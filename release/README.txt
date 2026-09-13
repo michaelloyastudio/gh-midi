@@ -19,7 +19,8 @@ YOUR CONTROLLER
 Ships pre-mapped for a Wii Guitar Hero guitar on a raphnet WUSBMote adapter.
 Other USB HID controllers: SETTINGS -> pick your device -> use the MAPPING
 table: hit LEARN on a row, press that control on your guitar, done. Each row
-can be re-learned or cleared (X) on its own. Saved permanently.
+can be re-learned or cleared (X) on its own. Every controller keeps its
+own remembered setup - switch devices and your mappings follow.
 
 
 HOW TO PLAY  (also in the "?" help inside the plugin)
@@ -27,8 +28,8 @@ HOW TO PLAY  (also in the "?" help inside the plugin)
 FRETS + STRUM     play (down and up strums are different voicings in CHORDS)
 WHAMMY            pitch bend, and/or CC20 you can link to any knob (SETTINGS)
 MINUS             switch mode:  CHORDS -> NOTES -> SOLO
-PLUS              octave
-STICK             change key (any direction)
+PLUS              tap through strum speeds (0-50ms)
+STICK             left/right = key, up/down = octave
 
 MODES
   CHORDS  every fret is a chord in the current key (green I, red V,

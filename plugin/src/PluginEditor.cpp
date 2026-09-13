@@ -105,7 +105,7 @@ GHMidiEditor::GHMidiEditor(GHMidiProcessor& p)
     strumLabel.setFont(juce::Font(juce::FontOptions(10.0f, juce::Font::bold)));
     strumLabel.setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.45f));
     addAndMakeVisible(strumSlider);
-    strumSlider.setRange(0.0, 30.0, 1.0);
+    strumSlider.setRange(0.0, 50.0, 1.0);
     strumSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 52, 20);
     strumSlider.setTextValueSuffix(" ms");
     strumSlider.onValueChange = [this]
@@ -202,6 +202,8 @@ void GHMidiEditor::timerCallback()
 {
     if (! isShowing())
         return;
+    if ((int) strumSlider.getValue() != proc.guitar().strumRollMs.load())
+        strumSlider.setValue(proc.guitar().strumRollMs.load(), juce::dontSendNotification);
     if (panelOpen)
     {
         auto& svc = proc.guitar();
@@ -427,24 +429,21 @@ void GHMidiEditor::paint(juce::Graphics& g)
         section("CONTROLS");
         line("FRETS + STRUM", "play - up and down strums feel different");
         line("WHAMMY", "bend the note");
-        line("PLUS", "octave up");
+        line("PLUS", "tap through strum speeds (0-50ms)");
         line("MINUS", "switch mode");
-        line("STICK", "change key (any direction)");
+        line("STICK", "left/right = key - up/down = octave");
         rowY += 8;
         section("MODES");
         line("CHORDS", "every fret is a chord in your key - can't miss");
-        line("", "  neighbours = 7th chords / stretches = the");
-        line("", "  missing ones (iii, III, bVII, iv, bVI)");
+        line("", "  hold two NEIGHBOUR frets = same chord, jazzy 7th");
+        line("", "  hold two frets APART = bonus chords the five");
+        line("", "  can't make - the name pops up as you play");
         line("SOLO", "5 frets = 5 safe scale notes. simple, can't miss");
         line("NOTES", "fret COMBOS unlock all 32 notes. full control");
         g.setColour(gold);
         g.setFont(ghFont(19.0f));
         g.drawText("FULL GUIDE", hb.getCentreX() - 112, hb.getBottom() - 92,
                    140, 26, juce::Justification::left);
-        g.setColour(juce::Colours::white.withAlpha(0.38f));
-        g.setFont(juce::Font(juce::FontOptions(11.0f)));
-        g.drawText("(leaves the plugin and opens your web browser)",
-                   hb.getX(), hb.getBottom() - 58, hb.getWidth(), 14,
-                   juce::Justification::centred);
+
     }
 }

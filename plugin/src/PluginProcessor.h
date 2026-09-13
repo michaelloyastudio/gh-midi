@@ -133,6 +133,8 @@ private:
     void scanDevices();
     void loadSettings();
     void saveSettings();
+    void applyMapForDevice();
+    juce::String deviceKey() const;
     static juce::File settingsFile();
 
     bool demoMode = false;
@@ -153,6 +155,7 @@ private:
     // ---- controller mapping (guarded by mapLock; step copies it per tick) ----
     mutable juce::CriticalSection mapLock;
     ControllerMap map;
+    juce::var controllersVar;   // per-device saved mappings (guitar thread only)
     std::atomic<int> mapVersion { 0 };
     std::atomic<int> targetVid { 0x289B }, targetPid { 0x0080 };
 

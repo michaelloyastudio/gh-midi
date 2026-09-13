@@ -97,41 +97,108 @@ juce::File GuitarService::settingsFile()
         .getChildFile("Application Support/GH MIDI/settings.json");
 }
 
-void GuitarService::loadSettings()
+static void varToMap(const juce::var& v, GuitarService::ControllerMap& m)
 {
-    const auto v = juce::JSON::parse(settingsFile());
-    if (! v.isObject())
-        return;
-    auto get = [&](const char* k, int fallback) { return v.hasProperty(k) ? (int) v[k] : fallback; };
-    targetVid = get("vid", targetVid.load());
-    targetPid = get("pid", targetPid.load());
-    hammerOn = get("hammer", 0) != 0;
-    whammyMode = juce::jlimit(0, 2, get("whammyMode", 0));
-    virtualMidiOn = get("virtualMidi", 1) != 0;
-    strumRollMs = juce::jlimit(0, 30, get("strumRoll", 10));
-
-    auto btn = [&](const char* k, ButtonMap& b)
+    auto btn = [&](const char* k, GuitarService::ButtonMap& b)
     {
         if (auto* a = v[k].getArray(); a != nullptr && a->size() >= 2)
             b = { (int) (*a)[0], (uint8_t) (int) (*a)[1] };
     };
-    btn("fretG", map.frets[0]); btn("fretR", map.frets[1]); btn("fretY", map.frets[2]);
-    btn("fretB", map.frets[3]); btn("fretO", map.frets[4]);
-    btn("strumDown", map.strumDown); btn("strumUp", map.strumUp);
-    btn("plus", map.plusBtn); btn("minus", map.minusBtn);
+    btn("fretG", m.frets[0]); btn("fretR", m.frets[1]); btn("fretY", m.frets[2]);
+    btn("fretB", m.frets[3]); btn("fretO", m.frets[4]);
+    btn("strumDown", m.strumDown); btn("strumUp", m.strumUp);
+    btn("plus", m.plusBtn); btn("minus", m.minusBtn);
     if (auto* a = v["whammy"].getArray(); a != nullptr && a->size() >= 3)
-        map.whammy = { (int) (*a)[0], (int) (*a)[1], (int) (*a)[2] };
-    auto stick = [&](const char* k, StickMap& s)
+        m.whammy = { (int) (*a)[0], (int) (*a)[1], (int) (*a)[2] };
+    auto stick = [&](const char* k, GuitarService::StickMap& sm)
     {
         if (auto* a = v[k].getArray(); a != nullptr && a->size() >= 4)
-            s = { (int) (*a)[0], (int) (*a)[1], (int) (*a)[2], (int) (*a)[3] };
+            sm = { (int) (*a)[0], (int) (*a)[1], (int) (*a)[2], (int) (*a)[3] };
     };
-    stick("stickX", map.stickX);
-    stick("stickY", map.stickY);
+    stick("stickX", m.stickX);
+    stick("stickY", m.stickY);
+}
+
+static juce::var mapToVar(const GuitarService::ControllerMap& m)
+{
+    auto* o = new juce::DynamicObject();
+    auto btn = [&](const char* k, const GuitarService::ButtonMap& b)
+    {
+        o->setProperty(k, juce::Array<juce::var> { b.byteIdx, (int) b.mask });
+    };
+    btn("fretG", m.frets[0]); btn("fretR", m.frets[1]); btn("fretY", m.frets[2]);
+    btn("fretB", m.frets[3]); btn("fretO", m.frets[4]);
+    btn("strumDown", m.strumDown); btn("strumUp", m.strumUp);
+    btn("plus", m.plusBtn); btn("minus", m.minusBtn);
+    o->setProperty("whammy", juce::Array<juce::var> { m.whammy.byteIdx, m.whammy.rest, m.whammy.extreme });
+    o->setProperty("stickX", juce::Array<juce::var> { m.stickX.byteIdx, m.stickX.center, m.stickX.lo, m.stickX.hi });
+    o->setProperty("stickY", juce::Array<juce::var> { m.stickY.byteIdx, m.stickY.center, m.stickY.lo, m.stickY.hi });
+    return juce::var(o);
+}
+
+juce::String GuitarService::deviceKey() const
+{
+    return "dev_" + juce::String::toHexString(targetVid.load())
+         + "_" + juce::String::toHexString(targetPid.load());
+}
+
+void GuitarService::applyMapForDevice()
+{
+    // known guitar ships pre-mapped; unknown controllers start blank (LEARN)
+    ControllerMap m;
+    if (targetVid.load() == 0x289B && targetPid.load() == 0x0080)
+        m = defaultWusbMap();
+    if (auto* o = controllersVar.getDynamicObject())
+    {
+        const juce::Identifier k(deviceKey());
+        if (o->hasProperty(k))
+            varToMap(o->getProperty(k), m);
+    }
+    {
+        const juce::ScopedLock sl(mapLock);
+        map = m;
+    }
+    ++mapVersion;
+}
+
+void GuitarService::loadSettings()
+{
+    const auto v = juce::JSON::parse(settingsFile());
+    controllersVar = juce::var(new juce::DynamicObject());
+    if (v.isObject())
+    {
+        auto get = [&](const char* k, int fallback) { return v.hasProperty(k) ? (int) v[k] : fallback; };
+        targetVid = get("vid", targetVid.load());
+        targetPid = get("pid", targetPid.load());
+        hammerOn = get("hammer", 0) != 0;
+        whammyMode = juce::jlimit(0, 2, get("whammyMode", 0));
+        virtualMidiOn = get("virtualMidi", 1) != 0;
+        strumRollMs = juce::jlimit(0, 50, get("strumRoll", 10));
+        if (v["controllers"].isObject())
+            controllersVar = v["controllers"];
+        else if (v.hasProperty("fretG"))
+        {
+            // migrate the old single-controller format
+            ControllerMap tmp = defaultWusbMap();
+            varToMap(v, tmp);
+            controllersVar.getDynamicObject()->setProperty(juce::Identifier(deviceKey()),
+                                                           mapToVar(tmp));
+        }
+    }
+    applyMapForDevice();
 }
 
 void GuitarService::saveSettings()
 {
+    {
+        ControllerMap snap;
+        {
+            const juce::ScopedLock sl(mapLock);
+            snap = map;
+        }
+        if (auto* o = controllersVar.getDynamicObject())
+            o->setProperty(juce::Identifier(deviceKey()), mapToVar(snap));
+    }
     auto* o = new juce::DynamicObject();
     o->setProperty("vid", targetVid.load());
     o->setProperty("pid", targetPid.load());
@@ -139,18 +206,7 @@ void GuitarService::saveSettings()
     o->setProperty("whammyMode", whammyMode.load());
     o->setProperty("virtualMidi", virtualMidiOn.load() ? 1 : 0);
     o->setProperty("strumRoll", strumRollMs.load());
-    auto btn = [&](const char* k, const ButtonMap& b)
-    {
-        juce::Array<juce::var> a { b.byteIdx, (int) b.mask };
-        o->setProperty(k, a);
-    };
-    btn("fretG", map.frets[0]); btn("fretR", map.frets[1]); btn("fretY", map.frets[2]);
-    btn("fretB", map.frets[3]); btn("fretO", map.frets[4]);
-    btn("strumDown", map.strumDown); btn("strumUp", map.strumUp);
-    btn("plus", map.plusBtn); btn("minus", map.minusBtn);
-    o->setProperty("whammy", juce::Array<juce::var> { map.whammy.byteIdx, map.whammy.rest, map.whammy.extreme });
-    o->setProperty("stickX", juce::Array<juce::var> { map.stickX.byteIdx, map.stickX.center, map.stickX.lo, map.stickX.hi });
-    o->setProperty("stickY", juce::Array<juce::var> { map.stickY.byteIdx, map.stickY.center, map.stickY.lo, map.stickY.hi });
+    o->setProperty("controllers", controllersVar);
 
     auto f = settingsFile();
     f.getParentDirectory().createDirectory();
@@ -327,12 +383,16 @@ void GuitarService::run()
             saveSettings();
         if (scanRequest.exchange(false))
             scanDevices();
-        if (reconnectRequest.exchange(false) && dev != nullptr)
+        if (reconnectRequest.exchange(false))
         {
-            allOff();
-            hid_close(dev);
-            dev = nullptr;
-            guitarFound = false;
+            if (dev != nullptr)
+            {
+                allOff();
+                hid_close(dev);
+                dev = nullptr;
+                guitarFound = false;
+            }
+            applyMapForDevice();   // each controller keeps its own setup
         }
 
         if (dev == nullptr)
@@ -658,22 +718,15 @@ void GuitarService::step(const uint8_t* d, int len)
     }
     prevMinus = minusB;
 
-    // plus: octave
+    // plus: tap through strum speeds
     if (plusB && ! prevPlus)
     {
-        if (mode != Easy)
-        {
-            octaveReal = octaveReal >= 24 ? -12 : octaveReal + 12;
-            uiOctave = octaveReal;
-            announce(mode == Real
-                         ? "base " + noteName(kRealBase + key + octaveReal)
-                         : "root " + noteName(48 + key + octaveReal));
-        }
-        else
-        {
-            easyOct = easyOct == 0 ? 12 : (easyOct == 12 ? -12 : 0);
-            announce(easyOct > 0 ? "octave +1" : easyOct < 0 ? "octave -1" : "octave 0");
-        }
+        int roll = strumRollMs.load() + 5;
+        if (roll > 50)
+            roll = 0;
+        strumRollMs = roll;
+        announce("strum " + juce::String(roll) + "ms");
+        saveRequest = true;
     }
     prevPlus = plusB;
 
@@ -757,19 +810,32 @@ void GuitarService::step(const uint8_t* d, int len)
             pos = 0;
         return 0;
     };
-    int dKey = 0;
     if (uiWhammy.load() <= 0.05f)
     {
-        dKey += flick(m.stickX, joyPos);
-        dKey += flick(m.stickY, joyPosY);
-    }
-    if (const int dx = dKey; dx != 0)
-    {
-        key = (key + dx + 12) % 12;
-        uiKey = key;
-        announce(mode == Real
-                     ? "base " + noteName(kRealBase + key + octaveReal)
-                     : "key " + juce::String(noteNames[key]));
+        if (const int dx = flick(m.stickX, joyPos); dx != 0)
+        {
+            key = (key + dx + 12) % 12;
+            uiKey = key;
+            announce(mode == Real
+                         ? "base " + noteName(kRealBase + key + octaveReal)
+                         : "key " + juce::String(noteNames[key]));
+        }
+        if (const int dy = flick(m.stickY, joyPosY); dy != 0)
+        {
+            if (mode != Easy)
+            {
+                octaveReal = juce::jlimit(-12, 24, octaveReal + dy * 12);
+                uiOctave = octaveReal;
+                announce(mode == Real
+                             ? "base " + noteName(kRealBase + key + octaveReal)
+                             : "root " + noteName(48 + key + octaveReal));
+            }
+            else
+            {
+                easyOct = juce::jlimit(-12, 12, easyOct + dy * 12);
+                announce(easyOct > 0 ? "octave +1" : easyOct < 0 ? "octave -1" : "octave 0");
+            }
+        }
     }
 
     // strum edges + ~10ms latch so late fingers still join the combo
@@ -813,7 +879,7 @@ void GuitarService::step(const uint8_t* d, int len)
                     const int root = kChordRootBase + key + easyOct + cd.rootOff;
                     const int third = root + cd.third;
                     const int topNote = cd.seventh > 0 ? root + cd.seventh : root + 12;
-                    const int rollMs = juce::jlimit(0, 30, strumRollMs.load());
+                    const int rollMs = juce::jlimit(0, 50, strumRollMs.load());
                     int seq[5];
                     if (latchDown)
                     {
