@@ -34,8 +34,9 @@ STICK             left/right = key, up/down = octave
 MODES
   CHORDS  every fret is a chord in the current key (green I, red V,
           yellow vi, blue IV, orange ii). You cannot play a wrong note.
-  SOLO    each fret is one note of the key's pentatonic scale - every note
-          fits over every chord.
+  SOLO    each fret is one note of the key's pentatonic scale - hold
+          several and strum to sound them together, like strings. Releasing
+          a fret stops just that note. Every combination fits.
   NOTES   frets are a binary number (G=1 R=2 Y=4 B=8 O=16) choosing
           chromatic notes. 32 notes per octave position - a real instrument
           you have to learn.

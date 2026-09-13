@@ -184,6 +184,7 @@ private:
     bool latchDown = true;
     juce::SortedSet<int> ringing;
     int ringFret = -1, ringCombo = -1;
+    int soloNotes[5] { -1, -1, -1, -1, -1 };  // SOLO: ringing note per fret
     int candCombo = -1;
     double candSince = 0.0;
     double lastLegatoAt = -1.0;
