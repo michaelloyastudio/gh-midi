@@ -438,8 +438,10 @@ void GHMidiEditor::paint(juce::Graphics& g)
         line("", "  hold two NEIGHBOUR frets = same chord, jazzy 7th");
         line("", "  hold two frets APART = bonus chords the five");
         line("", "  can't make - the name pops up as you play");
-        line("SOLO", "5 frets = 5 safe scale notes. simple, can't miss");
-        line("NOTES", "fret COMBOS unlock all 32 notes. full control");
+        line("SOLO", "5 scale notes. hold several + strum = they");
+        line("", "  all sound together, like strings. can't miss");
+        line("NOTES", "fret COMBOS pick single notes - all 32 of");
+        line("", "  them, like trumpet valves. full control");
         g.setColour(gold);
         g.setFont(ghFont(19.0f));
         g.drawText("FULL GUIDE", hb.getCentreX() - 112, hb.getBottom() - 92,

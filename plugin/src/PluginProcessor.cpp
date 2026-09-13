@@ -319,6 +319,8 @@ void GuitarService::allOff()
     for (int n : ringing)
         sendMsg(juce::MidiMessage::noteOff(1, n));
     ringing.clear();
+    for (auto& sn : soloNotes)
+        sn = -1;
     endGem();
 }
 
@@ -891,13 +893,38 @@ void GuitarService::step(const uint8_t* d, int len)
                 beginGem(combo, false);
                 announce(noteName(nn));
             }
-            else  // Penta
+            else  // SOLO: every held fret sounds together, like strings
             {
-                const int pn = pentaNote(key, octaveReal, strumTopFret);
-                noteOn(pn, vel);
-                ringFret = strumTopFret;
-                beginGem(strumTopFret >= 0 ? (1 << strumTopFret) : 0, false);
-                announce(noteName(pn));
+                if (combo != 0)
+                {
+                    const int rollMs = juce::jlimit(0, 50, strumRollMs.load());
+                    juce::String names;
+                    bool first = true;
+                    for (int k2 = 0; k2 < 5; ++k2)
+                    {
+                        const int i = latchDown ? k2 : 4 - k2;  // sweep direction
+                        if (! (combo & (1 << i)))
+                            continue;
+                        soloNotes[i] = pentaNote(key, octaveReal, i);
+                        if (! first && rollMs > 0)
+                            juce::Thread::sleep(rollMs);
+                        noteOn(soloNotes[i], vel);
+                        names += (first ? juce::String() : juce::String("+"))
+                                 + juce::String(noteNames[soloNotes[i] % 12]);
+                        first = false;
+                    }
+                    ringFret = 1;   // marker: fretted (per-fret release)
+                    beginGem(combo, false);
+                    announce(names);
+                }
+                else
+                {
+                    const int pn = pentaNote(key, octaveReal, -1);
+                    noteOn(pn, vel);
+                    ringFret = -1;  // the open root follows the strum bar
+                    beginGem(0, false);
+                    announce(noteName(pn));
+                }
             }
         }
     }
@@ -936,17 +963,29 @@ void GuitarService::step(const uint8_t* d, int len)
             }
         }
     }
-    else  // SOLO: same rule — held fret sounds, bar holds the open root
+    else  // SOLO: each note sounds while ITS fret is held, like strings
     {
         if (! ringing.isEmpty())
         {
-            if (ringFret >= 0 && ! (combo & (1 << ringFret)))
+            bool anyFretted = false;
+            for (int i = 0; i < 5; ++i)
+                if (soloNotes[i] >= 0)
+                {
+                    anyFretted = true;
+                    if (! (combo & (1 << i)))
+                    {
+                        sendMsg(juce::MidiMessage::noteOff(1, soloNotes[i]));
+                        ringing.removeValue(soloNotes[i]);
+                        soloNotes[i] = -1;
+                    }
+                }
+            if (anyFretted && ringing.isEmpty())
             {
-                allOff();
+                endGem();
                 ringFret = -1;
             }
-            else if (ringFret < 0 && ! strum)
-                allOff();
+            else if (! anyFretted && ringFret < 0 && ! strum)
+                allOff();   // open root follows the bar
         }
     }
 
