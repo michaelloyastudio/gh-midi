@@ -182,13 +182,11 @@ private:
     double strumLatchAt = -1.0;
     int latchVel = 100;
     bool latchDown = true;
-    double pedalUntil = -1.0;
     juce::SortedSet<int> ringing;
     int ringFret = -1, ringCombo = -1;
     int candCombo = -1;
     double candSince = 0.0;
     double lastLegatoAt = -1.0;
-    double muteAt = -1.0;
     int joyPos = 0, joyPosY = 0;
     float prevWham = 0.0f;
     double whamBusyUntil = -1.0;

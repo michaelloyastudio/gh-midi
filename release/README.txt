@@ -59,5 +59,5 @@ the guitar plug, plug USB back in.
 No pitch bend from the whammy - some presets ignore bend; set whammy to CC20
 in SETTINGS and link it to a pitch or filter knob (right-click the knob).
 
-Every mode: strum to sound a note or chord - changing frets never
-plays anything by itself. Release the fret to let it ring out.
+Every mode: strum to sound a note or chord. It sounds for as long as you
+hold the fret (or the strum bar, for open notes) and stops when you let go.
