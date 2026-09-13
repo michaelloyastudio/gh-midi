@@ -11,7 +11,6 @@ constexpr bool kMinor[5] = { false, false, true, false, true };
 constexpr int kPentaDeg[5] = { 0, 2, 4, 7, 9 };
 constexpr int kChordRootBase = 48, kBassBase = 36, kRealBase = 40;
 constexpr int kVelDown = 100, kVelUp = 78;
-constexpr double kLingerS = 0.20;   // grace after lifting fingers before the mute
 
 const char* noteNames[12] = { "C","C#","D","D#","E","F","F#","G","G#","A","A#","B" };
 
@@ -317,11 +316,6 @@ void GuitarService::noteOn(int note, int vel)
 
 void GuitarService::allOff()
 {
-    if (pedalUntil >= 0.0)
-    {
-        sendMsg(juce::MidiMessage::controllerEvent(1, 64, 0));
-        pedalUntil = -1.0;
-    }
     for (int n : ringing)
         sendMsg(juce::MidiMessage::noteOff(1, n));
     ringing.clear();
@@ -473,7 +467,6 @@ void GuitarService::run()
         {
             allOff();
             ringFret = ringCombo = candCombo = -1;
-            muteAt = -1.0;
             learnPhase = 0;
             learnByte = -1;
             learnT0 = now;
@@ -711,7 +704,6 @@ void GuitarService::step(const uint8_t* d, int len)
     {
         allOff();
         ringFret = ringCombo = candCombo = -1;
-        muteAt = -1.0;
         mode = (mode + 1) % 3;
         uiMode = mode;
         announce(mode == Easy ? "CHORDS" : mode == Real ? "NOTES" : "SOLO");
@@ -729,24 +721,6 @@ void GuitarService::step(const uint8_t* d, int len)
         saveRequest = true;
     }
     prevPlus = plusB;
-
-    // a lift whose grace expired rings out on the sustain pedal
-    if (muteAt >= 0.0 && now >= muteAt)
-    {
-        sendMsg(juce::MidiMessage::controllerEvent(1, 64, 127));
-        for (int rn : ringing)
-            sendMsg(juce::MidiMessage::noteOff(1, rn));
-        ringing.clear();
-        endGem();
-        pedalUntil = now + 2.8;
-        ringFret = ringCombo = candCombo = -1;
-        muteAt = -1.0;
-    }
-    if (pedalUntil >= 0.0 && now >= pedalUntil)
-    {
-        sendMsg(juce::MidiMessage::controllerEvent(1, 64, 0));
-        pedalUntil = -1.0;
-    }
 
     // live control-test bits (settings panel highlights)
     {
@@ -864,7 +838,6 @@ void GuitarService::step(const uint8_t* d, int len)
             const int vel = latchVel;
             allOff();
             candCombo = -1;
-            muteAt = -1.0;
             if (mode == Easy)
             {
                 if (combo != 0)
@@ -932,55 +905,48 @@ void GuitarService::step(const uint8_t* d, int len)
     // release / legato
     if (mode == Easy)
     {
+        // a chord sounds exactly while its frets are held; the open bass
+        // exactly while the strum bar is held
         if (! ringing.isEmpty())
         {
             if (ringFret > 0 && (combo & ringFret) != ringFret)
             {
-                // one of the chord's frets was released: let it ring out;
-                // pressing OTHER frets changes nothing until the next strum
-                if (muteAt < 0.0)
-                    muteAt = now + kLingerS;
+                allOff();
+                ringFret = -1;
             }
-            else if (ringFret < 0 && topFretNow < 0 && ! strum)
-            {
-                allOff();  // the open bass follows the strum bar
-            }
-            else if (ringFret > 0)
-                muteAt = -1.0;  // fully held again: keep ringing
+            else if (ringFret < 0 && ! strum)
+                allOff();
         }
     }
     else if (mode == Real)
     {
-        if (ringCombo >= 0)
+        // a note sounds while its full combo stays held (extra frets are
+        // fine); the open note exactly while the strum bar is held
+        if (! ringing.isEmpty())
         {
-            if (combo == 0)
+            if (ringCombo > 0 && (combo & ringCombo) != ringCombo)
             {
-                if (ringCombo > 0 && muteAt < 0.0)
-                    muteAt = now + kLingerS;
+                allOff();
+                ringCombo = -1;
             }
-            else if (combo != ringCombo)
+            else if (ringCombo == 0 && ! strum)
             {
-                muteAt = -1.0;   // changing frets: silent until the next strum
-                candCombo = -1;
-            }
-            else
-            {
-                muteAt = -1.0;
-                candCombo = -1;
+                allOff();
+                ringCombo = -1;
             }
         }
     }
-    else  // Penta/SOLO: strum-only, same rule as CHORDS
+    else  // SOLO: same rule — held fret sounds, bar holds the open root
     {
         if (! ringing.isEmpty())
         {
             if (ringFret >= 0 && ! (combo & (1 << ringFret)))
             {
-                if (muteAt < 0.0)
-                    muteAt = now + kLingerS;
+                allOff();
+                ringFret = -1;
             }
-            else if (ringFret >= 0)
-                muteAt = -1.0;
+            else if (ringFret < 0 && ! strum)
+                allOff();
         }
     }
 
