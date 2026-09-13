@@ -1,0 +1,96 @@
+{
+  "device": {
+    "vid": 10395,
+    "pid": 128,
+    "product": "1-player WUSBMote v2.2"
+  },
+  "idle": "01 80 3e 80 3e 80 3e 68 42 80 3e d8 dc 00 00",
+  "buttons": {
+    "green": {
+      "held": "01 80 3e 80 3e 80 3e 68 42 80 3e d8 dc 01 00",
+      "changed": [
+        13
+      ]
+    },
+    "red": {
+      "held": "01 80 3e 80 3e 80 3e 68 42 80 3e d8 dc 02 00",
+      "changed": [
+        13
+      ]
+    },
+    "yellow": {
+      "held": "01 80 3e 80 3e 80 3e 68 42 80 3e d8 dc 04 00",
+      "changed": [
+        13
+      ]
+    },
+    "blue": {
+      "held": "01 80 3e 80 3e 80 3e 68 42 80 3e d8 dc 08 00",
+      "changed": [
+        13
+      ]
+    },
+    "orange": {
+      "held": "01 80 3e 80 3e 80 3e 68 42 80 3e d8 dc 10 00",
+      "changed": [
+        13
+      ]
+    },
+    "strum_up": {
+      "held": "01 80 3e 80 3e 80 3e 68 42 80 3e d8 dc 00 01",
+      "changed": [
+        14
+      ]
+    },
+    "strum_down": {
+      "held": "01 80 3e 80 3e 80 3e 68 42 80 3e d8 dc 20 00",
+      "changed": [
+        13
+      ]
+    },
+    "plus": {
+      "held": "01 80 3e 80 3e 80 3e 68 42 80 3e d8 dc 40 00",
+      "changed": [
+        13
+      ]
+    },
+    "minus": {
+      "held": "01 80 3e 80 3e 80 3e 68 42 80 3e d8 dc 80 00",
+      "changed": [
+        13
+      ]
+    }
+  },
+  "analogs": {
+    "whammy": {
+      "bytes": {
+        "11": {
+          "min": 0,
+          "max": 232,
+          "rest": 216
+        },
+        "12": {
+          "min": 0,
+          "max": 238,
+          "rest": 220
+        }
+      },
+      "samples": 47
+    },
+    "touch_strip": {
+      "bytes": {
+        "11": {
+          "min": 40,
+          "max": 216,
+          "rest": 216
+        },
+        "12": {
+          "min": 11,
+          "max": 244,
+          "rest": 220
+        }
+      },
+      "samples": 14
+    }
+  }
+}

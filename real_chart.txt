@@ -1,0 +1,35 @@
+REAL MODE FINGERING CHART  (G R Y B O, - = not pressed)
+base octave shown from E2; plus button shifts octave
+
+  -----     E2
+  G----     F2
+  -R---    F#2
+  GR---     G2
+  --Y--    G#2
+  G-Y--     A2
+  -RY--    A#2
+  GRY--     B2
+  ---B-     C3
+  G--B-    C#3
+  -R-B-     D3
+  GR-B-    D#3
+  --YB-     E3
+  G-YB-     F3
+  -RYB-    F#3
+  GRYB-     G3
+  ----O    G#3
+  G---O     A3
+  -R--O    A#3
+  GR--O     B3
+  --Y-O     C4
+  G-Y-O    C#4
+  -RY-O     D4
+  GRY-O    D#4
+  ---BO     E4
+  G--BO     F4
+  -R-BO    F#4
+  GR-BO     G4
+  --YBO    G#4
+  G-YBO     A4
+  -RYBO    A#4
+  GRYBO     B4

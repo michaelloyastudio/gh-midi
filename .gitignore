@@ -1,0 +1,7 @@
+plugin/build/
+release/*.zip
+release/GH-MIDI-v*/
+.venv/
+__pycache__/
+*.log
+.DS_Store
