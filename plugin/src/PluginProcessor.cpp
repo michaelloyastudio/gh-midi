@@ -108,7 +108,7 @@ void GuitarService::loadSettings()
     hammerOn = get("hammer", 0) != 0;
     whammyMode = juce::jlimit(0, 2, get("whammyMode", 0));
     virtualMidiOn = get("virtualMidi", 1) != 0;
-    strumRollMs = juce::jlimit(0, 15, get("strumRoll", 10));
+    strumRollMs = juce::jlimit(0, 30, get("strumRoll", 10));
 
     auto btn = [&](const char* k, ButtonMap& b)
     {
@@ -813,7 +813,7 @@ void GuitarService::step(const uint8_t* d, int len)
                     const int root = kChordRootBase + key + easyOct + cd.rootOff;
                     const int third = root + cd.third;
                     const int topNote = cd.seventh > 0 ? root + cd.seventh : root + 12;
-                    const int rollMs = juce::jlimit(0, 15, strumRollMs.load());
+                    const int rollMs = juce::jlimit(0, 30, strumRollMs.load());
                     int seq[5];
                     if (latchDown)
                     {

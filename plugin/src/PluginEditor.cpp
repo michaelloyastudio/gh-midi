@@ -100,16 +100,18 @@ GHMidiEditor::GHMidiEditor(GHMidiProcessor& p)
         clear->onClick = [this, t] { proc.guitar().clearMapping(t); };
     }
 
-    addChildComponent(strumLabel);
-    strumLabel.setText("Strum spread", juce::dontSendNotification);
-    strumLabel.setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.85f));
-    addChildComponent(strumSlider);
-    strumSlider.setRange(0.0, 15.0, 1.0);
+    addAndMakeVisible(strumLabel);
+    strumLabel.setText("STRUM", juce::dontSendNotification);
+    strumLabel.setFont(juce::Font(juce::FontOptions(10.0f, juce::Font::bold)));
+    strumLabel.setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.45f));
+    addAndMakeVisible(strumSlider);
+    strumSlider.setRange(0.0, 30.0, 1.0);
     strumSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 52, 20);
     strumSlider.setTextValueSuffix(" ms");
     strumSlider.onValueChange = [this]
     { proc.guitar().strumRollMs = (int) strumSlider.getValue(); };
     strumSlider.onDragEnd = [this] { proc.guitar().requestSave(); };
+    strumSlider.setValue(proc.guitar().strumRollMs.load(), juce::dontSendNotification);
 
     addChildComponent(vmidiToggle);
     vmidiToggle.onClick = [this]
@@ -146,7 +148,7 @@ void GHMidiEditor::setPanelVisible(bool visible)
     panelOpen = visible;
     for (auto* c : std::initializer_list<juce::Component*> {
              &deviceLabel, &deviceBox, &rescanBtn, &vmidiToggle,
-             &strumLabel, &strumSlider, &closeBtn, &learnHint })
+             &closeBtn, &learnHint })
         c->setVisible(visible);
     for (int t = 0; t < rowNames.size(); ++t)
     {
@@ -159,7 +161,6 @@ void GHMidiEditor::setPanelVisible(bool visible)
     {
         proc.guitar().requestDeviceScan();
         vmidiToggle.setToggleState(proc.guitar().virtualMidiOn.load(), juce::dontSendNotification);
-        strumSlider.setValue(proc.guitar().strumRollMs.load(), juce::dontSendNotification);
         refreshMappingRows();
     }
     else
@@ -268,10 +269,11 @@ void GHMidiEditor::resized()
     }
     r.removeFromTop(8);
     vmidiToggle.setBounds(r.removeFromTop(24));
-    auto strumRow = r.removeFromTop(24);
-    strumLabel.setBounds(strumRow.removeFromLeft(104));
-    strumSlider.setBounds(strumRow);
     closeBtn.setBounds(r.removeFromBottom(28).withSizeKeepingCentre(110, 28));
+
+    // strum spread: always at hand, bottom-right
+    strumLabel.setBounds(getWidth() - 208, getHeight() - 46, 48, 16);
+    strumSlider.setBounds(getWidth() - 162, getHeight() - 50, 146, 24);
 
     // help overlay
     auto hb = helpBounds(getWidth(), getHeight());
