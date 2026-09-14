@@ -2,9 +2,10 @@
 
 Turn a Guitar Hero controller into a real MIDI instrument.
 
-A VST3 plugin (macOS, Apple Silicon + Intel) that reads a Guitar Hero
-controller over USB HID and plays it like an instrument inside your DAW —
-with a real-time 3D note highway rendered in OpenGL.
+A VST3 plugin and standalone app (macOS, Apple Silicon + Intel) that reads a
+Guitar Hero controller over USB HID and plays it like an instrument — inside
+your DAW, or as a MIDI controller for anything — with a real-time 3D note
+highway rendered in OpenGL.
 
 **Full guide:** https://michaelloya.studio/gh-midi
 
@@ -19,9 +20,16 @@ with a real-time 3D note highway rendered in OpenGL.
 - **SOLO** — each fret is one note of the key's pentatonic scale. Every note
   fits over every chord.
 
-Whammy = pitch bend (+ CC20 for knob-linking). Minus cycles modes, plus
-cycles octaves, the joystick changes key. Any HID controller can be mapped
+Whammy = pitch bend (+ CC20 for knob-linking). Minus cycles modes, plus taps
+through strum speeds, the joystick changes key (left/right) and octave
+(up/down, ±3 octaves in every mode) — and on-screen arrows do all four for
+controllers without a joystick. Any HID controller can be mapped
 from the in-plugin settings (per-control LEARN, live input testing).
+
+**No DAW required.** The release also ships a standalone macOS app: while it
+runs, every DAW and synth app on the Mac sees a MIDI input called "GH MIDI"
+(Logic, GarageBand, Ableton, FL, Reaper, ...). Run either the app or the
+plugin, not both — only one process can hold the guitar.
 
 The plugin also publishes a virtual MIDI source ("GH MIDI") so DAWs record
 your performance as editable notes.
@@ -51,6 +59,11 @@ an additional input backend beyond hidapi. PRs welcome.
 
 `tools/` scripts from the prototyping era (Python HID dump / mapper /
 MIDI bridge) are kept for adapter debugging.
+
+## Made with Claude Code
+
+The plugin, the README and the user guide were made with Claude Code. Some
+details may be inaccurate; the code is the reference.
 
 ## License
 

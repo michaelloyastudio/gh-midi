@@ -1,5 +1,6 @@
 #include "PluginEditor.h"
 #include <BinaryData.h>
+#include <cstdlib>
 
 namespace {
 const juce::Colour gemColours[5] = {
@@ -22,13 +23,25 @@ juce::Font ghFont(float h)
     return juce::Font(juce::FontOptions(ghTypeface()).withHeight(h));
 }
 
+const juce::String arrowL(juce::CharPointer_UTF8("\xE2\x97\x80"));   // left-pointing triangle
+const juce::String arrowR(juce::CharPointer_UTF8("\xE2\x96\xB6"));   // right-pointing triangle
+const juce::String arrowU(juce::CharPointer_UTF8("\xE2\x96\xB2"));   // up-pointing triangle
+const juce::String arrowD(juce::CharPointer_UTF8("\xE2\x96\xBC"));   // down-pointing triangle
+const juce::String arrowNE(juce::CharPointer_UTF8("\xE2\x86\x97"));  // north-east arrow
+
 juce::Rectangle<int> panelBounds(int W, int H)
 {
-    return { W / 2 - 250, H / 2 - 275, 500, 550 };
+    return { W / 2 - 250, H / 2 - 240, 500, 480 };
 }
 juce::Rectangle<int> helpBounds(int W, int H)
 {
-    return { W / 2 - 230, H / 2 - 225, 460, 450 };
+    return { W / 2 - 230, H / 2 - 190, 460, 380 };
+}
+// bottom row: MODE / STRUM / KEY / OCTAVE plate — label row, value row with
+// arrows, then a badge naming the guitar control (minus and plus side by side)
+juce::Rectangle<int> hudPlate(int W, int H)
+{
+    return { 16, H - 72, W - 32, 60 };
 }
 } // namespace
 
@@ -47,6 +60,22 @@ GHMidiEditor::GHMidiEditor(GHMidiProcessor& p)
     gearBtn.onClick = [this] { setHelpVisible(false); setPanelVisible(! panelOpen); };
     addAndMakeVisible(helpBtn);
     helpBtn.onClick = [this] { setPanelVisible(false); setHelpVisible(! helpOpen); };
+
+    auto initArrow = [this](juce::TextButton& b, const juce::String& glyph, std::function<void()> fn)
+    {
+        addAndMakeVisible(b);
+        b.setButtonText(glyph);
+        b.setWantsKeyboardFocus(false);
+        b.onClick = std::move(fn);
+    };
+    initArrow(modePrev, arrowL, [this] { proc.guitar().nudgeMode(-1); });
+    initArrow(modeNext, arrowR, [this] { proc.guitar().nudgeMode(1); });
+    initArrow(strumPrev, arrowL, [this] { proc.guitar().nudgeStrum(-1); });
+    initArrow(strumNext, arrowR, [this] { proc.guitar().nudgeStrum(1); });
+    initArrow(keyPrev,  arrowL, [this] { proc.guitar().nudgeKey(-1); });
+    initArrow(keyNext,  arrowR, [this] { proc.guitar().nudgeKey(1); });
+    initArrow(octPrev,  arrowL, [this] { proc.guitar().nudgeOctave(-1); });
+    initArrow(octNext,  arrowR, [this] { proc.guitar().nudgeOctave(1); });
 
     auto initLabel = [this](juce::Label& l, const juce::String& text, float alpha = 0.85f)
     {
@@ -100,19 +129,6 @@ GHMidiEditor::GHMidiEditor(GHMidiProcessor& p)
         clear->onClick = [this, t] { proc.guitar().clearMapping(t); };
     }
 
-    addAndMakeVisible(strumLabel);
-    strumLabel.setText("STRUM", juce::dontSendNotification);
-    strumLabel.setFont(juce::Font(juce::FontOptions(10.0f, juce::Font::bold)));
-    strumLabel.setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.45f));
-    addAndMakeVisible(strumSlider);
-    strumSlider.setRange(0.0, 50.0, 1.0);
-    strumSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 52, 20);
-    strumSlider.setTextValueSuffix(" ms");
-    strumSlider.onValueChange = [this]
-    { proc.guitar().strumRollMs = (int) strumSlider.getValue(); };
-    strumSlider.onDragEnd = [this] { proc.guitar().requestSave(); };
-    strumSlider.setValue(proc.guitar().strumRollMs.load(), juce::dontSendNotification);
-
     addChildComponent(vmidiToggle);
     vmidiToggle.onClick = [this]
     {
@@ -128,14 +144,34 @@ GHMidiEditor::GHMidiEditor(GHMidiProcessor& p)
 
     addChildComponent(helpCloseBtn);
     helpCloseBtn.onClick = [this] { setHelpVisible(false); };
-    addChildComponent(guideBtn);
-    guideBtn.onClick = []
+    addChildComponent(moreBtn);
+    moreBtn.setButtonText("MORE HELP  " + arrowNE);
+    moreBtn.setColour(juce::TextButton::buttonColourId, gold);
+    moreBtn.setColour(juce::TextButton::textColourOffId, juce::Colour(0xff15151f));
+    moreBtn.onClick = []
     {
         juce::URL("https://michaelloya.studio/gh-midi").launchInDefaultBrowser();
     };
 
+    if (auto* env = std::getenv("GHMIDI_HUDSNAP"); env != nullptr && juce::JUCEApplicationBase::isStandaloneApp())
+        hudSnapDir = env;
+
     setSize(720, 620);
     startTimerHz(30);
+}
+
+void GHMidiEditor::saveHudSnapshot(const juce::String& name)
+{
+    juce::Image img(juce::Image::ARGB, getWidth(), getHeight(), true);   // transparent: composite over a GL frame
+    {
+        juce::Graphics g(img);
+        paintEntireComponent(g, false);
+    }
+    const auto file = juce::File(hudSnapDir).getChildFile("hud_" + name + ".png");
+    file.deleteFile();
+    juce::FileOutputStream os(file);
+    if (os.openedOk())
+        juce::PNGImageFormat().writeImageToStream(img, os);
 }
 
 GHMidiEditor::~GHMidiEditor()
@@ -165,6 +201,7 @@ void GHMidiEditor::setPanelVisible(bool visible)
     }
     else
         proc.guitar().cancelLearn();
+    updateHudButtons();
     repaint();
 }
 
@@ -172,8 +209,25 @@ void GHMidiEditor::setHelpVisible(bool visible)
 {
     helpOpen = visible;
     helpCloseBtn.setVisible(visible);
-    guideBtn.setVisible(visible);
+    moreBtn.setVisible(visible);
+    updateHudButtons();
     repaint();
+}
+
+void GHMidiEditor::updateHudButtons()
+{
+    const bool show = ! panelOpen && ! helpOpen;
+    for (auto* c : std::initializer_list<juce::Component*> {
+             &modePrev, &modeNext, &strumPrev, &strumNext, &keyPrev, &keyNext, &octPrev, &octNext })
+        c->setVisible(show);
+    // octave and strum arrows grey out at the ends of their ranges
+    const int mode = proc.guitar().uiMode.load() % 3;
+    const int oct = mode == 0 ? proc.guitar().uiEasyOct.load() : proc.guitar().uiOctave.load();
+    octPrev.setEnabled(oct > GuitarService::kOctaveMin);
+    octNext.setEnabled(oct < GuitarService::kOctaveMax);
+    const int ms = proc.guitar().strumRollMs.load();
+    strumPrev.setEnabled(ms > 0);
+    strumNext.setEnabled(ms < GuitarService::kStrumMaxMs);
 }
 
 void GHMidiEditor::refreshDeviceBox()
@@ -202,8 +256,29 @@ void GHMidiEditor::timerCallback()
 {
     if (! isShowing())
         return;
-    if ((int) strumSlider.getValue() != proc.guitar().strumRollMs.load())
-        strumSlider.setValue(proc.guitar().strumRollMs.load(), juce::dontSendNotification);
+    if (hudSnapDir.isNotEmpty())
+    {
+        // scripted tour of the HUD states (dev only, standalone only)
+        auto& svc = proc.guitar();
+        switch (++hudSnapTick)
+        {
+            case 45:  saveHudSnapshot("chords"); break;
+            case 50:  svc.uiMode = 1; svc.uiKey = 7; svc.uiOctave = 12; break;
+            case 60:  saveHudSnapshot("notes"); break;
+            case 65:  svc.uiMode = 2; svc.uiOctave = 36;
+                      svc.uiButtonBits = (1 << GuitarService::LMinus) | (1 << GuitarService::LStickY)
+                                       | (1 << GuitarService::LPlus);
+                      break;
+            case 75:  saveHudSnapshot("solo_maxoct"); break;
+            case 80:  setHelpVisible(true); break;
+            case 90:  saveHudSnapshot("help"); break;
+            case 95:  setHelpVisible(false); setPanelVisible(true); break;
+            case 105: saveHudSnapshot("settings"); break;
+            case 135: juce::JUCEApplicationBase::quit(); break;
+            default: break;
+        }
+    }
+    updateHudButtons();
     if (panelOpen)
     {
         auto& svc = proc.guitar();
@@ -245,11 +320,29 @@ void GHMidiEditor::timerCallback()
 void GHMidiEditor::resized()
 {
     highway.setViewSize(getWidth(), getHeight());
-    gearBtn.setBounds(getWidth() - 300, 12, 92, 26);
-    helpBtn.setBounds(getWidth() - 336, 12, 30, 26);
+    gearBtn.setBounds(getWidth() - 104, 16, 92, 28);
+    helpBtn.setBounds(getWidth() - 140, 16, 30, 28);
+
+    // MODE / STRUM / KEY / OCTAVE plate: arrows either side of each value
+    {
+        const auto plate = hudPlate(getWidth(), getHeight());
+        const int colW = plate.getWidth() / 4;
+        juce::TextButton* arrows[4][2] = { { &modePrev, &modeNext },
+                                           { &strumPrev, &strumNext },
+                                           { &keyPrev, &keyNext },
+                                           { &octPrev, &octNext } };
+        for (int i = 0; i < 4; ++i)
+        {
+            auto row = juce::Rectangle<int>(plate.getX() + i * colW, plate.getY() + 19, colW, 22).reduced(6, 0);
+            arrows[i][0]->setBounds(row.removeFromLeft(24));
+            arrows[i][1]->setBounds(row.removeFromRight(24));
+        }
+    }
 
     // settings panel
-    auto r = panelBounds(getWidth(), getHeight()).reduced(20);
+    const auto pb = panelBounds(getWidth(), getHeight());
+    closeBtn.setBounds(pb.getRight() - 40, pb.getY() + 12, 28, 26);
+    auto r = pb.reduced(20);
     r.removeFromTop(34);  // painted title
     auto devRow = r.removeFromTop(24);
     deviceLabel.setBounds(devRow.removeFromLeft(76));
@@ -262,7 +355,7 @@ void GHMidiEditor::resized()
     for (int t = 0; t < rowNames.size(); ++t)
     {
         auto row = r.removeFromTop(22);
-        rowNames[t]->setBounds(row.removeFromLeft(112));
+        rowNames[t]->setBounds(row.removeFromLeft(136));
         rowClear[t]->setBounds(row.removeFromRight(30).reduced(0, 1));
         row.removeFromRight(4);
         rowLearn[t]->setBounds(row.removeFromRight(62).reduced(0, 1));
@@ -271,16 +364,11 @@ void GHMidiEditor::resized()
     }
     r.removeFromTop(8);
     vmidiToggle.setBounds(r.removeFromTop(24));
-    closeBtn.setBounds(r.removeFromBottom(28).withSizeKeepingCentre(110, 28));
-
-    // strum spread: always at hand, bottom-right
-    strumLabel.setBounds(getWidth() - 208, getHeight() - 46, 48, 16);
-    strumSlider.setBounds(getWidth() - 162, getHeight() - 50, 146, 24);
 
     // help overlay
     auto hb = helpBounds(getWidth(), getHeight());
-    guideBtn.setBounds(hb.getCentreX() + 34, hb.getBottom() - 94, 44, 30);
-    helpCloseBtn.setBounds(hb.getCentreX() - 55, hb.getBottom() - 44, 110, 26);
+    moreBtn.setBounds(hb.getCentreX() - 90, hb.getBottom() - 78, 180, 32);
+    helpCloseBtn.setBounds(hb.getRight() - 40, hb.getY() + 12, 28, 26);
 }
 
 void GHMidiEditor::paint(juce::Graphics& g)
@@ -291,7 +379,21 @@ void GHMidiEditor::paint(juce::Graphics& g)
 
     g.setColour(juce::Colours::white.withAlpha(0.85f));
     g.setFont(ghFont(28.0f));
-    g.drawText("GH MIDI", 20, 12, 180, 28, juce::Justification::left);
+    g.drawText("GH MIDI", 20, 14, 124, 32, juce::Justification::left);
+
+    // small gold pill naming the guitar control that changes a setting;
+    // fills solid while that control is being touched
+    const int liveBits = proc.guitar().uiButtonBits.load();
+    auto badge = [&](juce::Rectangle<float> r, const juce::String& text, bool lit)
+    {
+        g.setColour(gold.withAlpha(lit ? 0.95f : 0.10f));
+        g.fillRoundedRectangle(r, r.getHeight() * 0.5f);
+        g.setColour(gold.withAlpha(lit ? 1.0f : 0.45f));
+        g.drawRoundedRectangle(r, r.getHeight() * 0.5f, 1.0f);
+        g.setColour(lit ? juce::Colour(0xff15151f) : gold.withAlpha(0.85f));
+        g.setFont(juce::Font(juce::FontOptions(9.0f, juce::Font::bold)));
+        g.drawText(text, r.toNearestInt(), juce::Justification::centred);
+    };
 
     // chord/note name pop
     {
@@ -302,50 +404,51 @@ void GHMidiEditor::paint(juce::Graphics& g)
             const float a = juce::jlimit(0.0f, 1.0f, 1.8f - age * 1.2f);
             g.setColour(gold.withAlpha(a));
             g.setFont(ghFont(48.0f * pop));
-            g.drawText(proc.guitar().getLastPlayed(), 0, (int) (H * 0.07f), getWidth(), 58,
+            g.drawText(proc.guitar().getLastPlayed(), 0, (int) (H * 0.08f), getWidth(), 58,
                        juce::Justification::centred);
         }
     }
 
-    // mode / key plate, with actual labels
+    // MODE / STRUM / KEY / OCTAVE plate: current settings, arrows either side (buttons)
     {
+        const auto plate = hudPlate(getWidth(), getHeight());
         g.setColour(juce::Colour(0x8810101a));
-        g.fillRoundedRectangle(W - 196.0f, 12.0f, 178.0f, 30.0f, 6.0f);
+        g.fillRoundedRectangle(plate.toFloat(), 6.0f);
         const int mode = proc.guitar().uiMode.load() % 3;
         const int uiK = proc.guitar().uiKey.load() % 12;
-        const bool pro = mode == 1;
-        g.setColour(juce::Colours::white.withAlpha(0.38f));
-        g.setFont(juce::Font(juce::FontOptions(9.0f, juce::Font::bold)));
-        g.drawText("MODE", (int) W - 188, 14, 80, 10, juce::Justification::left);
-        g.drawText(pro ? "BASE" : "KEY", (int) W - 100, 14, 84, 10, juce::Justification::right);
-        g.setColour(juce::Colours::white.withAlpha(0.9f));
-        g.setFont(ghFont(18.0f));
-        juce::String modeTxt(modeNames[mode]);
-        g.drawText(modeTxt, (int) W - 188, 22, 84, 18, juce::Justification::left);
-        juce::String keyTxt;
-        if (pro)
+        const bool notes = mode == 1;
+        const int octSemis = mode == 0 ? proc.guitar().uiEasyOct.load() : proc.guitar().uiOctave.load();
+        const int oct = octSemis / 12;
+        juce::String vals[4] = { modeNames[mode],
+                                 juce::String(proc.guitar().strumRollMs.load()) + " ms",
+                                 keyNames[uiK],
+                                 oct > 0 ? "+" + juce::String(oct) : juce::String(oct) };
+        if (notes)   // NOTES: show the lowest playable note, key and octave folded in
         {
-            const int baseNote = 40 + uiK + proc.guitar().uiOctave.load();
-            keyTxt = juce::String(keyNames[baseNote % 12]) + juce::String(baseNote / 12 - 1);
+            const int base = 40 + uiK + proc.guitar().uiOctave.load();
+            vals[2] = juce::String(keyNames[base % 12]) + juce::String(base / 12 - 1);
         }
-        else
-            keyTxt = keyNames[uiK];
-        g.drawText(keyTxt, (int) W - 100, 22, 84, 18, juce::Justification::right);
-    }
-
-    // bottom legend, tidy
-    {
-        g.setFont(juce::Font(juce::FontOptions(11.0f)));
-        const char* parts[] = { "MINUS  mode", "PLUS  octave", "STICK  key", "?  guide" };
-        int x = 16;
-        for (auto* part : parts)
+        const char* labels[4] = { "MODE", "STRUM SPREAD", notes ? "BASE" : "KEY", "OCTAVE" };
+        // the guitar control for each column, mirrored on the on-screen arrows
+        const juce::String guitarCtl[4] = { "MINUS", "PLUS",
+                                            "JOYSTICK " + arrowL + " " + arrowR,
+                                            "JOYSTICK " + arrowU + " " + arrowD };
+        const float badgeW[4] = { 56.0f, 56.0f, 98.0f, 98.0f };
+        const int badgeBit[4] = { GuitarService::LMinus, GuitarService::LPlus,
+                                  GuitarService::LStickX, GuitarService::LStickY };
+        const int colW = plate.getWidth() / 4;
+        for (int i = 0; i < 4; ++i)
         {
-            g.setColour(juce::Colours::white.withAlpha(0.42f));
-            g.drawText(part, x, (int) H - 24, 110, 14, juce::Justification::left);
-            x += 104;
-            g.setColour(gold.withAlpha(0.35f));
-            if (part != parts[3])
-                g.fillEllipse((float) x - 12.0f, H - 18.5f, 3.0f, 3.0f);
+            const int cx = plate.getX() + i * colW;
+            g.setColour(juce::Colours::white.withAlpha(0.38f));
+            g.setFont(juce::Font(juce::FontOptions(9.0f, juce::Font::bold)));
+            g.drawText(labels[i], cx, plate.getY() + 6, colW, 10, juce::Justification::centred);
+            g.setColour(juce::Colours::white.withAlpha(0.9f));
+            g.setFont(ghFont(18.0f));
+            g.drawText(vals[i], cx + 30, plate.getY() + 20, colW - 60, 20, juce::Justification::centred);
+            badge({ (float) cx + ((float) colW - badgeW[i]) * 0.5f, (float) plate.getY() + 43.0f,
+                    badgeW[i], 14.0f },
+                  guitarCtl[i], (liveBits & (1 << badgeBit[i])) != 0);
         }
     }
 
@@ -363,25 +466,6 @@ void GHMidiEditor::paint(juce::Graphics& g)
                    0, (int) (H * 0.46f), getWidth(), 28, juce::Justification::centred);
     }
 
-    // whammy meter
-    {
-        const float wham = proc.guitar().uiWhammy.load();
-        juce::Rectangle<float> bar(W * 0.5f - W * 0.14f, H - 48.0f, W * 0.28f, 9.0f);
-        g.setColour(juce::Colour(0xcc15151f));
-        g.fillRoundedRectangle(bar, 4.0f);
-        if (wham > 0.0f)
-        {
-            juce::ColourGradient wg(openBarColour.brighter(0.5f), bar.getX(), bar.getCentreY(),
-                                    openBarColour.darker(0.3f), bar.getRight(), bar.getCentreY(), false);
-            g.setGradientFill(wg);
-            g.fillRoundedRectangle(bar.withWidth(bar.getWidth() * wham), 4.0f);
-        }
-        g.setColour(juce::Colours::white.withAlpha(0.30f));
-        g.setFont(juce::Font(juce::FontOptions(10.0f)));
-        g.drawText("WHAMMY", (int) bar.getX(), (int) (bar.getY() - 12), (int) bar.getWidth(), 11,
-                   juce::Justification::centred);
-    }
-
     auto drawOverlayFrame = [&](juce::Rectangle<float> pb, const juce::String& title)
     {
         g.setColour(juce::Colours::black.withAlpha(0.55f));
@@ -396,8 +480,8 @@ void GHMidiEditor::paint(juce::Graphics& g)
                    (int) pb.getWidth() - 40, 26, juce::Justification::left);
         g.setColour(juce::Colours::white.withAlpha(0.35f));
         g.setFont(juce::Font(juce::FontOptions(11.0f)));
-        g.drawText("v1.1", (int) pb.getX() + 20, (int) pb.getY() + 12,
-                   (int) pb.getWidth() - 40, 26, juce::Justification::right);
+        g.drawText("v1.1", (int) pb.getX() + 20, (int) pb.getBottom() - 30,
+                   (int) pb.getWidth() - 40, 16, juce::Justification::right);
     };
 
     if (panelOpen)
@@ -416,36 +500,28 @@ void GHMidiEditor::paint(juce::Graphics& g)
             g.drawText(s, hb.getX() + 30, rowY, hb.getWidth() - 60, 20, juce::Justification::left);
             rowY += 24;
         };
-        auto line = [&](const juce::String& head, const juce::String& body)
+        auto line = [&](const juce::String& head, const juce::String& body, int headW = 116)
         {
             g.setFont(juce::Font(juce::FontOptions(12.5f, juce::Font::bold)));
             g.setColour(juce::Colours::white.withAlpha(0.9f));
-            g.drawText(head, hb.getX() + 34, rowY, 116, 16, juce::Justification::left);
+            g.drawText(head, hb.getX() + 34, rowY, headW, 16, juce::Justification::left);
             g.setFont(juce::Font(juce::FontOptions(12.5f)));
             g.setColour(juce::Colours::white.withAlpha(0.62f));
-            g.drawText(body, hb.getX() + 152, rowY, hb.getWidth() - 186, 16, juce::Justification::left);
+            g.drawText(body, hb.getX() + 36 + headW, rowY, hb.getWidth() - 70 - headW, 16,
+                       juce::Justification::left);
             rowY += 20;
         };
         section("CONTROLS");
         line("FRETS + STRUM", "play - up and down strums feel different");
         line("WHAMMY", "bend the note");
-        line("PLUS", "tap through strum speeds (0-50ms)");
         line("MINUS", "switch mode");
-        line("STICK", "left/right = key - up/down = octave");
+        line("PLUS", "tap through strum speeds (0-50ms)");
+        line("JOYSTICK", "left/right = key - up/down = octave");
+        line("ON SCREEN", "the bottom arrows do all of the above too");
         rowY += 8;
         section("MODES");
-        line("CHORDS", "every fret is a chord in your key - can't miss");
-        line("", "  hold two NEIGHBOUR frets = same chord, jazzy 7th");
-        line("", "  hold two frets APART = bonus chords the five");
-        line("", "  can't make - the name pops up as you play");
-        line("SOLO", "5 scale notes. hold several + strum = they");
-        line("", "  all sound together, like strings. can't miss");
-        line("NOTES", "fret COMBOS pick single notes - all 32 of");
-        line("", "  them, like trumpet valves. full control");
-        g.setColour(gold);
-        g.setFont(ghFont(19.0f));
-        g.drawText("FULL GUIDE", hb.getCentreX() - 112, hb.getBottom() - 92,
-                   140, 26, juce::Justification::left);
-
+        line("CHORDS", "every fret is a chord in your key. can't miss", 70);
+        line("SOLO", "5 scale notes, strum any stack. can't miss", 70);
+        line("NOTES", "fret combos pick all 32 notes. full control", 70);
     }
 }

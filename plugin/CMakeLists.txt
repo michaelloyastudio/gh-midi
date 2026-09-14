@@ -25,7 +25,9 @@ FetchContent_Declare(hidapi
 FetchContent_MakeAvailable(JUCE hidapi)
 
 juce_add_plugin(GHMidi
-    COMPANY_NAME "Loya"
+    COMPANY_NAME "Michael Loya Studio"
+    COMPANY_WEBSITE "https://michaelloya.studio"
+    BUNDLE_ID "studio.michaelloya.ghmidi"
     PRODUCT_NAME "GH MIDI"
     PLUGIN_MANUFACTURER_CODE Loya
     PLUGIN_CODE Ghmd
@@ -34,6 +36,18 @@ juce_add_plugin(GHMidi
     NEEDS_MIDI_INPUT FALSE
     NEEDS_MIDI_OUTPUT TRUE
     IS_MIDI_EFFECT FALSE
+    # JUCE's standalone Options menu always offers "Bluetooth MIDI", and
+    # tapping it asks CoreBluetooth for access. Without a usage string in
+    # Info.plist macOS does not deny the request, it SIGABRTs the process --
+    # confirmed in the crash report as a TCC privacy violation. GH MIDI does
+    # not use Bluetooth itself; this only stops the OS killing the app when
+    # someone opens that menu item.
+    # "GH" set in MetalMania on the app's own stage background. Regenerate
+    # with tools_make_icon.py -- it ports kBgFrag out of HighwayRenderer.cpp
+    # rather than upscaling a screenshot.
+    ICON_BIG "assets/icon.png"
+    BLUETOOTH_PERMISSION_ENABLED TRUE
+    BLUETOOTH_PERMISSION_TEXT "GH MIDI needs Bluetooth only if you want to connect a Bluetooth MIDI device. The guitar itself connects over USB."
     COPY_PLUGIN_AFTER_BUILD TRUE)
 
 target_sources(GHMidi PRIVATE

@@ -5,3 +5,6 @@ release/GH-MIDI-v*/
 __pycache__/
 *.log
 .DS_Store
+guide/guide.html
+guide/.chrome-profile/
+release/*.pdf

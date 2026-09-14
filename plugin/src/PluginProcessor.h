@@ -14,6 +14,7 @@ class GuitarService : private juce::Thread
 {
 public:
     enum Mode { Easy = 0, Real = 1, Penta = 2 };
+    static constexpr int kOctaveMin = -36, kOctaveMax = 36;   // semitones, ±3 octaves
 
     struct ButtonMap
     {
@@ -56,7 +57,8 @@ public:
     std::atomic<int> uiFretBits { 0 };
     std::atomic<int> uiMode { Easy };
     std::atomic<int> uiKey { 0 };
-    std::atomic<int> uiOctave { 0 };
+    std::atomic<int> uiOctave { 0 };     // NOTES / SOLO octave offset (semitones)
+    std::atomic<int> uiEasyOct { 0 };    // CHORDS octave offset (semitones)
     std::atomic<float> uiWhammy { 0.0f };
     std::atomic<bool> guitarFound { false };
     std::atomic<double> lastPlayedAt { -1.0e9 };  // when the HUD label last changed
@@ -72,6 +74,13 @@ public:
     // ---- state-restore requests (picked up by the guitar thread) ----
     std::atomic<int> modeRequest { -1 };
     std::atomic<int> keyRequest { -1 };
+
+    // ---- on-screen arrows: the UI adds a delta, the guitar thread applies it ----
+    void nudgeMode(int d)   { modeNudge += d;   notify(); }
+    void nudgeKey(int d)    { keyNudge += d;    notify(); }
+    void nudgeOctave(int d) { octaveNudge += d; notify(); }
+    void nudgeStrum(int d)  { strumNudge += d;  notify(); }   // ±5 ms per step
+    static constexpr int kStrumStepMs = 5, kStrumMaxMs = 50;
 
     // ---- devices & calibration (UI thread calls; work runs on the guitar thread) ----
     void requestDeviceScan() { scanRequest = true; notify(); }
@@ -176,6 +185,11 @@ private:
     int axMin[64] {}, axMax[64] {};
 
     // engine state (guitar thread only)
+    std::atomic<int> modeNudge { 0 }, keyNudge { 0 }, octaveNudge { 0 }, strumNudge { 0 };
+    void cycleMode(int dir);
+    void shiftKey(int d);
+    void shiftOctave(int d);
+    void setStrum(int ms);
     int mode = Easy;
     int key = 0, octaveReal = 0, easyOct = 0;
     bool prevDown = false, prevUp = false, prevPlus = false, prevMinus = false;

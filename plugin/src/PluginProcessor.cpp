@@ -374,6 +374,11 @@ void GuitarService::run()
         if (mReq >= 0) { mode = mReq % 3; uiMode = mode; }
         const int kReq = keyRequest.exchange(-1);
         if (kReq >= 0) { key = kReq % 12; uiKey = key; }
+        if (const int d = modeNudge.exchange(0); d != 0)   cycleMode(d);
+        if (const int d = keyNudge.exchange(0); d != 0)    shiftKey(d);
+        if (const int d = octaveNudge.exchange(0); d != 0) shiftOctave(d);
+        if (const int d = strumNudge.exchange(0); d != 0)
+            setStrum(juce::jlimit(0, kStrumMaxMs, strumRollMs.load() + d * kStrumStepMs));
 
         if (saveRequest.exchange(false))
             saveSettings();
@@ -494,7 +499,7 @@ juce::String GuitarService::targetName(int t)
 {
     static const char* names[] = { "GREEN FRET", "RED FRET", "YELLOW FRET", "BLUE FRET",
                                    "ORANGE FRET", "STRUM DOWN", "STRUM UP", "PLUS BUTTON",
-                                   "MINUS BUTTON", "WHAMMY", "STICK LEFT/RIGHT", "STICK UP/DOWN" };
+                                   "MINUS BUTTON", "WHAMMY", "JOYSTICK LEFT/RIGHT", "JOYSTICK UP/DOWN" };
     return t >= 0 && t < LTargetCount ? names[t] : juce::String();
 }
 
@@ -674,6 +679,51 @@ void GuitarService::learnTick(const uint8_t* d, int len, double now)
     }
 }
 
+// ---------- mode / key / octave (guitar thread only) ----------
+void GuitarService::cycleMode(int dir)
+{
+    allOff();
+    ringFret = ringCombo = candCombo = -1;
+    mode = ((mode + dir) % 3 + 3) % 3;
+    uiMode = mode;
+    announce(mode == Easy ? "CHORDS" : mode == Real ? "NOTES" : "SOLO");
+}
+
+void GuitarService::shiftKey(int d)
+{
+    key = ((key + d) % 12 + 12) % 12;
+    uiKey = key;
+    announce(mode == Real ? "base " + noteName(kRealBase + key + octaveReal)
+                          : "key " + juce::String(noteNames[key]));
+}
+
+// octave offsets run -3..+3 in every mode: that spans the piano and keeps
+// every mode's highest/lowest note inside MIDI 0..127
+void GuitarService::shiftOctave(int d)
+{
+    if (mode != Easy)
+    {
+        octaveReal = juce::jlimit(kOctaveMin, kOctaveMax, octaveReal + d * 12);
+        uiOctave = octaveReal;
+        announce(mode == Real ? "base " + noteName(kRealBase + key + octaveReal)
+                              : "root " + noteName(48 + key + octaveReal));
+    }
+    else
+    {
+        easyOct = juce::jlimit(kOctaveMin, kOctaveMax, easyOct + d * 12);
+        uiEasyOct = easyOct;
+        const int o = easyOct / 12;
+        announce("octave " + (o > 0 ? "+" + juce::String(o) : juce::String(o)));
+    }
+}
+
+void GuitarService::setStrum(int ms)
+{
+    strumRollMs = ms;
+    announce("strum " + juce::String(ms) + "ms");
+    saveRequest = true;
+}
+
 // ---------- the instrument ----------
 void GuitarService::step(const uint8_t* d, int len)
 {
@@ -703,24 +753,16 @@ void GuitarService::step(const uint8_t* d, int len)
 
     // minus: cycle mode
     if (minusB && ! prevMinus)
-    {
-        allOff();
-        ringFret = ringCombo = candCombo = -1;
-        mode = (mode + 1) % 3;
-        uiMode = mode;
-        announce(mode == Easy ? "CHORDS" : mode == Real ? "NOTES" : "SOLO");
-    }
+        cycleMode(1);
     prevMinus = minusB;
 
-    // plus: tap through strum speeds
+    // plus: tap through strum speeds (wraps back to 0)
     if (plusB && ! prevPlus)
     {
-        int roll = strumRollMs.load() + 5;
-        if (roll > 50)
+        int roll = strumRollMs.load() + kStrumStepMs;
+        if (roll > kStrumMaxMs)
             roll = 0;
-        strumRollMs = roll;
-        announce("strum " + juce::String(roll) + "ms");
-        saveRequest = true;
+        setStrum(roll);
     }
     prevPlus = plusB;
 
@@ -768,8 +810,8 @@ void GuitarService::step(const uint8_t* d, int len)
         }
     }
 
-    // joystick flicks: X = transpose (ignored while the whammy is in use —
-    // on some guitars the whammy bleeds into the stick axis)
+    // joystick flicks: left/right = key, up/down = octave (ignored while the
+    // whammy is in use — on some guitars the whammy bleeds into the joystick axes)
     auto flick = [&](const StickMap& sm, int& pos) -> int
     {
         if (! sm.valid() || sm.byteIdx >= len)
@@ -789,29 +831,11 @@ void GuitarService::step(const uint8_t* d, int len)
     if (uiWhammy.load() <= 0.05f)
     {
         if (const int dx = flick(m.stickX, joyPos); dx != 0)
-        {
-            key = (key + dx + 12) % 12;
-            uiKey = key;
-            announce(mode == Real
-                         ? "base " + noteName(kRealBase + key + octaveReal)
-                         : "key " + juce::String(noteNames[key]));
-        }
-        if (const int dy = flick(m.stickY, joyPosY); dy != 0)
-        {
-            if (mode != Easy)
-            {
-                octaveReal = juce::jlimit(-12, 24, octaveReal + dy * 12);
-                uiOctave = octaveReal;
-                announce(mode == Real
-                             ? "base " + noteName(kRealBase + key + octaveReal)
-                             : "root " + noteName(48 + key + octaveReal));
-            }
-            else
-            {
-                easyOct = juce::jlimit(-12, 12, easyOct + dy * 12);
-                announce(easyOct > 0 ? "octave +1" : easyOct < 0 ? "octave -1" : "octave 0");
-            }
-        }
+            shiftKey(dx);
+        // HID Y axes grow DOWNWARD: pushing the joystick up reads as a smaller
+        // value, and up has to mean octave up
+        if (const int dy = -flick(m.stickY, joyPosY); dy != 0)
+            shiftOctave(dy);
     }
 
     // strum edges + ~10ms latch so late fingers still join the combo
@@ -1027,11 +1051,9 @@ void GHMidiProcessor::getStateInformation(juce::MemoryBlock& dest)
 void GHMidiProcessor::setStateInformation(const void* data, int size)
 {
     juce::MemoryInputStream in(data, (size_t) size, false);
-    const int m = juce::jlimit(0, 2, in.readInt());
+    in.readInt();   // mode is saved for compatibility but not restored: always start in CHORDS
     const int k = juce::jlimit(0, 11, in.readInt());
-    service->uiMode = m;
     service->uiKey = k;
-    service->modeRequest = m;
     service->keyRequest = k;
     service->hammerOn = in.readInt() != 0;
 }

@@ -16,6 +16,7 @@ private:
     void timerCallback() override;
     void setPanelVisible(bool visible);
     void setHelpVisible(bool visible);
+    void updateHudButtons();
     void refreshDeviceBox();
     void refreshMappingRows();
 
@@ -27,18 +28,24 @@ private:
 
     juce::TextButton gearBtn { "SETTINGS" }, helpBtn { "?" };
 
+    // on-screen arrows for the three settings the controller also changes
+    juce::TextButton modePrev, modeNext, strumPrev, strumNext, keyPrev, keyNext, octPrev, octNext;
+
     // settings panel
     juce::Label deviceLabel, learnHint;
     juce::ComboBox deviceBox;
-    juce::TextButton rescanBtn { "RESCAN" }, closeBtn { "CLOSE" };
-    juce::Slider strumSlider;
-    juce::Label strumLabel;
+    juce::TextButton rescanBtn { "RESCAN" }, closeBtn { "X" };
     juce::ToggleButton vmidiToggle { "Virtual MIDI output (record notes in your DAW)" };
     juce::OwnedArray<juce::Label> rowNames, rowDescs;
     juce::OwnedArray<juce::TextButton> rowLearn, rowClear;
 
     // help overlay
-    juce::TextButton helpCloseBtn { "CLOSE" }, guideBtn { juce::String(juce::CharPointer_UTF8("\xE2\x86\x97")) };
+    juce::TextButton helpCloseBtn { "X" }, moreBtn { "MORE HELP" };
+
+    // GHMIDI_HUDSNAP=<dir> (standalone only): paint the HUD states to PNGs and quit
+    juce::String hudSnapDir;
+    int hudSnapTick = 0;
+    void saveHudSnapshot(const juce::String& name);
 
     juce::Array<GuitarService::DeviceInfo> shownDevices;
     int lastDevVersion = -1, lastMapVersion = -1, lastLearnTarget = -999;
