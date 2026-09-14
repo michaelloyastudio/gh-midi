@@ -9,7 +9,7 @@ const juce::Colour gemColours[5] = {
 };
 const juce::Colour openBarColour(0xffa05ff0);
 const juce::Colour gold(0xfff2d02a);
-const char* modeNames[3] = { "CHORDS", "NOTES", "SOLO" };
+const char* modeNames[4] = { "CHORDS", "NOTES", "SOLO", "CHART" };
 const char* keyNames[12] = { "C","C#","D","D#","E","F","F#","G","G#","A","A#","B" };
 
 juce::Typeface::Ptr ghTypeface()
@@ -35,7 +35,7 @@ juce::Rectangle<int> panelBounds(int W, int H)
 }
 juce::Rectangle<int> helpBounds(int W, int H)
 {
-    return { W / 2 - 230, H / 2 - 190, 460, 380 };
+    return { W / 2 - 230, H / 2 - 205, 460, 410 };
 }
 // bottom row: MODE / STRUM / KEY / OCTAVE plate — label row, value row with
 // arrows, then a badge naming the guitar control (minus and plus side by side)
@@ -220,14 +220,18 @@ void GHMidiEditor::updateHudButtons()
     for (auto* c : std::initializer_list<juce::Component*> {
              &modePrev, &modeNext, &strumPrev, &strumNext, &keyPrev, &keyNext, &octPrev, &octNext })
         c->setVisible(show);
-    // octave and strum arrows grey out at the ends of their ranges
-    const int mode = proc.guitar().uiMode.load() % 3;
+    // octave and strum arrows grey out at the ends of their ranges; in CHART
+    // mode strum, key and octave don't apply at all
+    const int mode = proc.guitar().uiMode.load() % 4;
+    const bool chart = mode == GuitarService::Chart;
     const int oct = mode == 0 ? proc.guitar().uiEasyOct.load() : proc.guitar().uiOctave.load();
-    octPrev.setEnabled(oct > GuitarService::kOctaveMin);
-    octNext.setEnabled(oct < GuitarService::kOctaveMax);
+    keyPrev.setEnabled(! chart);
+    keyNext.setEnabled(! chart);
+    octPrev.setEnabled(! chart && oct > GuitarService::kOctaveMin);
+    octNext.setEnabled(! chart && oct < GuitarService::kOctaveMax);
     const int ms = proc.guitar().strumRollMs.load();
-    strumPrev.setEnabled(ms > 0);
-    strumNext.setEnabled(ms < GuitarService::kStrumMaxMs);
+    strumPrev.setEnabled(! chart && ms > 0);
+    strumNext.setEnabled(! chart && ms < GuitarService::kStrumMaxMs);
 }
 
 void GHMidiEditor::refreshDeviceBox()
@@ -270,6 +274,8 @@ void GHMidiEditor::timerCallback()
                                        | (1 << GuitarService::LPlus);
                       break;
             case 75:  saveHudSnapshot("solo_maxoct"); break;
+            case 77:  svc.uiMode = 3; svc.uiButtonBits = 0; svc.announceFrets(0x03); break;
+            case 79:  saveHudSnapshot("chart"); break;
             case 80:  setHelpVisible(true); break;
             case 90:  saveHudSnapshot("help"); break;
             case 95:  setHelpVisible(false); setPanelVisible(true); break;
@@ -402,10 +408,30 @@ void GHMidiEditor::paint(juce::Graphics& g)
         {
             const float pop = 1.0f + 0.35f * std::exp(-age * 9.0f);
             const float a = juce::jlimit(0.0f, 1.0f, 1.8f - age * 1.2f);
-            g.setColour(gold.withAlpha(a));
             g.setFont(ghFont(48.0f * pop));
-            g.drawText(proc.guitar().getLastPlayed(), 0, (int) (H * 0.08f), getWidth(), 58,
-                       juce::Justification::centred);
+            const int mask = proc.guitar().lastPlayedFrets.load();
+            if (mask != 0)   // CHART: one letter per held fret, in that fret's colour
+            {
+                const float adv = 40.0f * pop;
+                int n = 0;
+                for (int i = 0; i < 5; ++i)
+                    n += (mask >> i) & 1;
+                float x = W * 0.5f - adv * (float) n * 0.5f;
+                for (int i = 0; i < 5; ++i)
+                    if (mask & (1 << i))
+                    {
+                        g.setColour(gemColours[i].withAlpha(a));
+                        g.drawText(juce::String::charToString((juce::juce_wchar) "GRYBO"[i]),
+                                   (int) x, (int) (H * 0.08f), (int) adv, 58, juce::Justification::centred);
+                        x += adv;
+                    }
+            }
+            else
+            {
+                g.setColour(gold.withAlpha(a));
+                g.drawText(proc.guitar().getLastPlayed(), 0, (int) (H * 0.08f), getWidth(), 58,
+                           juce::Justification::centred);
+            }
         }
     }
 
@@ -414,9 +440,10 @@ void GHMidiEditor::paint(juce::Graphics& g)
         const auto plate = hudPlate(getWidth(), getHeight());
         g.setColour(juce::Colour(0x8810101a));
         g.fillRoundedRectangle(plate.toFloat(), 6.0f);
-        const int mode = proc.guitar().uiMode.load() % 3;
+        const int mode = proc.guitar().uiMode.load() % 4;
         const int uiK = proc.guitar().uiKey.load() % 12;
         const bool notes = mode == 1;
+        const bool chart = mode == GuitarService::Chart;
         const int octSemis = mode == 0 ? proc.guitar().uiEasyOct.load() : proc.guitar().uiOctave.load();
         const int oct = octSemis / 12;
         juce::String vals[4] = { modeNames[mode],
@@ -440,6 +467,9 @@ void GHMidiEditor::paint(juce::Graphics& g)
         for (int i = 0; i < 4; ++i)
         {
             const int cx = plate.getX() + i * colW;
+            const bool dimmed = chart && i > 0;   // CHART: strum, key and octave don't apply
+            if (dimmed)
+                g.beginTransparencyLayer(0.3f);
             g.setColour(juce::Colours::white.withAlpha(0.38f));
             g.setFont(juce::Font(juce::FontOptions(9.0f, juce::Font::bold)));
             g.drawText(labels[i], cx, plate.getY() + 6, colW, 10, juce::Justification::centred);
@@ -449,6 +479,8 @@ void GHMidiEditor::paint(juce::Graphics& g)
             badge({ (float) cx + ((float) colW - badgeW[i]) * 0.5f, (float) plate.getY() + 43.0f,
                     badgeW[i], 14.0f },
                   guitarCtl[i], (liveBits & (1 << badgeBit[i])) != 0);
+            if (dimmed)
+                g.endTransparencyLayer();
         }
     }
 
@@ -523,5 +555,6 @@ void GHMidiEditor::paint(juce::Graphics& g)
         line("CHORDS", "every fret is a chord in your key. can't miss", 70);
         line("SOLO", "5 scale notes, strum any stack. can't miss", 70);
         line("NOTES", "fret combos pick all 32 notes. full control", 70);
+        line("CHART", "frets = Clone Hero lanes. record a rough chart", 70);
     }
 }

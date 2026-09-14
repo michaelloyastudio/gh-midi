@@ -13,7 +13,7 @@
 class GuitarService : private juce::Thread
 {
 public:
-    enum Mode { Easy = 0, Real = 1, Penta = 2 };
+    enum Mode { Easy = 0, Real = 1, Penta = 2, Chart = 3 };
     static constexpr int kOctaveMin = -36, kOctaveMax = 36;   // semitones, ±3 octaves
 
     struct ButtonMap
@@ -62,6 +62,8 @@ public:
     std::atomic<float> uiWhammy { 0.0f };
     std::atomic<bool> guitarFound { false };
     std::atomic<double> lastPlayedAt { -1.0e9 };  // when the HUD label last changed
+    std::atomic<int> lastPlayedFrets { 0 };       // CHART pops: fret mask, drawn as coloured letters (0 = plain text)
+    void announceFrets(int mask);                 // CHART: pop the held frets as letters
     std::atomic<bool> adapterEmpty { false };
     std::atomic<bool> hammerOn { false };   // legacy blob compat; no longer user-facing
     std::atomic<int> uiButtonBits { 0 };    // live control test: bit per LearnTarget
@@ -199,6 +201,7 @@ private:
     juce::SortedSet<int> ringing;
     int ringFret = -1, ringCombo = -1;
     int soloNotes[5] { -1, -1, -1, -1, -1 };  // SOLO: ringing note per fret
+    int chartHeld = 0;                         // CHART: frets whose lane notes are sounding
     int candCombo = -1;
     double candSince = 0.0;
     double lastLegatoAt = -1.0;

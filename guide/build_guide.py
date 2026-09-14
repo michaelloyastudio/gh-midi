@@ -175,8 +175,9 @@ def p_welcome():
 <tr><td>07</td><td>CHORDS mode</td><td>8</td></tr>
 <tr><td>08</td><td>NOTES mode</td><td>10</td></tr>
 <tr><td>09</td><td>SOLO mode</td><td>11</td></tr>
-<tr><td>10</td><td>Settings &amp; other controllers</td><td>12</td></tr>
-<tr><td>11</td><td>Troubleshooting</td><td>13</td></tr>
+<tr><td>10</td><td>CHART mode</td><td>12</td></tr>
+<tr><td>11</td><td>Settings &amp; other controllers</td><td>13</td></tr>
+<tr><td>12</td><td>Troubleshooting</td><td>14</td></tr>
 </table>"""
 
 def p_install():
@@ -235,14 +236,14 @@ def p_daw():
 
 def p_controller():
     return h2("04", "Your controller") + f"""
-<p>Pre-mapped for a <b>Wii Guitar Hero guitar</b> on a <b>raphnet WUSBMote</b> adapter. Other USB controllers: section 10.</p>
+<p>Pre-mapped for a <b>Wii Guitar Hero guitar</b> on a <b>raphnet WUSBMote</b> adapter. Other USB controllers: section 11.</p>
 <div class="figure">{GUITAR_SVG}</div>
 <table>
 <tr><th style="width:24%">Control</th><th>Does</th></tr>
 <tr><td><b>Frets</b></td><td>Pick the chord or note. Patterns are written {pat("G-Y--")} in this guide.</td></tr>
 <tr><td><b>Strum bar</b></td><td>Makes the sound. Down and up are separate. In CHORDS they are two voicings; up is softer.</td></tr>
 <tr><td><b>Whammy</b></td><td>Bends the pitch down.</td></tr>
-<tr><td><b>Minus</b></td><td>Next mode: CHORDS → NOTES → SOLO.</td></tr>
+<tr><td><b>Minus</b></td><td>Next mode: CHORDS → NOTES → SOLO → CHART.</td></tr>
 <tr><td><b>Plus</b></td><td>Strum spread, 0 to 50 ms, then back to 0.</td></tr>
 <tr><td><b>Joystick</b></td><td>Left / right = key. Up / down = octave.</td></tr>
 </table>
@@ -284,12 +285,13 @@ def p_playing():
 <h3>Strum spread</h3>
 <p>Chords and SOLO stacks are strummed: low to high on a down-strum, high to low on an up. Strum spread is the gap between the notes. 0 for stabs, 10 for a natural pick, 30+ for a slow sweep.</p>
 
-<h3>The three modes</h3>
+<h3>The modes</h3>
 <table>
 <tr><th style="width:18%">Mode</th><th style="width:44%">A fret is…</th><th>For</th></tr>
 <tr><td><b>CHORDS</b></td><td>a whole chord in your key</td><td>songs, rhythm. Every note is in key.</td></tr>
 <tr><td><b>NOTES</b></td><td>a binary digit: combos pick one of 32 notes</td><td>riffs, basslines, melodies. Takes practice.</td></tr>
 <tr><td><b>SOLO</b></td><td>one note of the pentatonic scale</td><td>leads over CHORDS. Every note is in key.</td></tr>
+<tr><td><b>CHART</b></td><td>a Clone Hero lane</td><td>recording a rough chart to finish in a chart editor.</td></tr>
 </table>"""
 
 def p_chords():
@@ -388,8 +390,36 @@ def p_solo():
 <h3>With CHORDS</h3>
 <p>Record a CHORDS part, press minus to switch to SOLO, play over it. Both modes share the same KEY. Use OCTAVE to put the solo above the chords.</p>"""
 
+def p_chart():
+    lanes = [("Expert", 96), ("Hard", 84), ("Medium", 72), ("Easy", 60)]
+    rows = "".join(f"<tr><td>{d}</td><td class='mono'>{b} – {b + 4}</td></tr>" for d, b in lanes)
+    return h2("10", "CHART mode") + f"""
+<p class="lead">Play along to a song and record a rough Clone Hero chart. Finish it in a chart editor.</p>
+<p>Each fret sends the note number Clone Hero uses for that lane, on all four difficulties at once. Strum = note on, let go = note off, so holds become sustains. Key, octave and strum spread are off. The screen shows the letters of the frets you hit, in their colours.</p>
+<h3>Charting a song</h3>
+<ol class="steps">
+<li>In your DAW, put the song on an audio track and set the project tempo to the song's BPM.</li>
+<li>Add a MIDI track with input <b>GH MIDI</b> (section 03), arm it, switch GH MIDI to CHART.</li>
+<li>Play through the song. Green, red, yellow, blue and orange land on their lanes as you strum.</li>
+<li>Export that MIDI track as a <code>.mid</code>. Name the track <b>PART GUITAR</b> if your DAW lets you.</li>
+<li>Open the .mid in <b>Moonscraper Chart Editor</b> with the audio. Snap to the grid, move, add, delete. Export for Clone Hero.</li>
+</ol>
+<div class="cols">
+<div>
+<h3>Lane notes</h3>
+<table><tr><th>Difficulty</th><th>Green – orange</th></tr>{rows}</table>
+<p class="muted" style="margin-top:6pt">Every difficulty gets the same notes. Thin the lower ones in the editor.</p>
+</div>
+<div>
+<h3>Done in the editor, not here</h3>
+<p>Hammer-ons and pull-offs, star power, open notes, solo sections, tempo changes. GH MIDI records what you strummed and when. The editor turns that into a chart.</p>
+<p class="muted">Tempo matters. If the DAW tempo is wrong, notes land off the grid and snapping moves them.</p>
+</div>
+</div>
+<img class="shot small" src="assets/ui-chart.jpg" alt="">"""
+
 def p_settings():
-    return h2("10", "Settings &amp; other controllers") + """
+    return h2("11", "Settings &amp; other controllers") + """
 <div class="cols">
 <div>
 <img class="shot" src="assets/ui-settings.jpg" alt="">
@@ -410,7 +440,7 @@ def p_settings():
 <p><code>~/Library/Application Support/GH MIDI/settings.json</code>. Delete it to start over. The app and plugin always start in CHORDS.</p>"""
 
 def p_trouble():
-    return h2("11", "Troubleshooting") + f"""
+    return h2("12", "Troubleshooting") + f"""
 <table class="trouble">
 <tr><th style="width:34%">It says / it does</th><th>Try</th></tr>
 <tr><td><b>CONTROLLER NOT FOUND</b></td><td>Plug the guitar in. SETTINGS → Controller → pick it → RESCAN. Still nothing: allow your DAW under System Settings → Privacy &amp; Security → Input Monitoring. Make sure the app and the plugin aren't both running.</td></tr>
@@ -540,8 +570,9 @@ def build_html():
         page(p_songs(), "CHORDS mode", 9),
         page(p_notes(), "NOTES mode", 10),
         page(p_solo(), "SOLO mode", 11),
-        page(p_settings(), "Settings", 12),
-        page(p_trouble(), "Troubleshooting", 13),
+        page(p_chart(), "CHART mode", 12),
+        page(p_settings(), "Settings", 13),
+        page(p_trouble(), "Troubleshooting", 14),
     ]
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>GH MIDI User Guide</title>

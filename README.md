@@ -19,6 +19,9 @@ highway rendered in OpenGL.
   to learn.
 - **SOLO** — each fret is one note of the key's pentatonic scale. Every note
   fits over every chord.
+- **CHART** — each fret sends its Clone Hero lane note, all four difficulties
+  at once. Record a rough chart in your DAW, export the .mid, finish it in
+  Moonscraper.
 
 Whammy = pitch bend (+ CC20 for knob-linking). Minus cycles modes, plus taps
 through strum speeds, the joystick changes key (left/right) and octave

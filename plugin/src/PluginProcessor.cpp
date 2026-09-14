@@ -11,6 +11,9 @@ constexpr bool kMinor[5] = { false, false, true, false, true };
 constexpr int kPentaDeg[5] = { 0, 2, 4, 7, 9 };
 constexpr int kChordRootBase = 48, kBassBase = 36, kRealBase = 40;
 constexpr int kVelDown = 100, kVelUp = 78;
+// CHART mode: Clone Hero / Rock Band PART GUITAR lanes, green..orange = base..base+4,
+// one base per difficulty (Easy, Medium, Hard, Expert). Every difficulty is written at once.
+constexpr int kChartLanes[4] = { 60, 72, 84, 96 };
 
 const char* noteNames[12] = { "C","C#","D","D#","E","F","F#","G","G#","A","A#","B" };
 
@@ -321,6 +324,7 @@ void GuitarService::allOff()
     ringing.clear();
     for (auto& sn : soloNotes)
         sn = -1;
+    chartHeld = 0;
     endGem();
 }
 
@@ -349,8 +353,25 @@ void GuitarService::endGem()
 
 void GuitarService::announce(const juce::String& s)
 {
-    const juce::ScopedLock sl(labelLock);
-    lastPlayed = s;
+    {
+        const juce::ScopedLock sl(labelLock);
+        lastPlayed = s;
+    }
+    lastPlayedFrets = 0;
+    lastPlayedAt = juce::Time::getMillisecondCounterHiRes() * 0.001;
+}
+
+void GuitarService::announceFrets(int mask)
+{
+    juce::String s;
+    for (int i = 0; i < 5; ++i)
+        if (mask & (1 << i))
+            s << "GRYBO"[i];
+    {
+        const juce::ScopedLock sl(labelLock);
+        lastPlayed = s;
+    }
+    lastPlayedFrets = mask;
     lastPlayedAt = juce::Time::getMillisecondCounterHiRes() * 0.001;
 }
 
@@ -371,7 +392,7 @@ void GuitarService::run()
     while (! threadShouldExit())
     {
         const int mReq = modeRequest.exchange(-1);
-        if (mReq >= 0) { mode = mReq % 3; uiMode = mode; }
+        if (mReq >= 0) { mode = mReq % 4; uiMode = mode; }
         const int kReq = keyRequest.exchange(-1);
         if (kReq >= 0) { key = kReq % 12; uiKey = key; }
         if (const int d = modeNudge.exchange(0); d != 0)   cycleMode(d);
@@ -684,9 +705,9 @@ void GuitarService::cycleMode(int dir)
 {
     allOff();
     ringFret = ringCombo = candCombo = -1;
-    mode = ((mode + dir) % 3 + 3) % 3;
+    mode = ((mode + dir) % 4 + 4) % 4;
     uiMode = mode;
-    announce(mode == Easy ? "CHORDS" : mode == Real ? "NOTES" : "SOLO");
+    announce(mode == Easy ? "CHORDS" : mode == Real ? "NOTES" : mode == Penta ? "SOLO" : "CHART");
 }
 
 void GuitarService::shiftKey(int d)
@@ -917,7 +938,7 @@ void GuitarService::step(const uint8_t* d, int len)
                 beginGem(combo, false);
                 announce(noteName(nn));
             }
-            else  // SOLO: every held fret sounds together, like strings
+            else if (mode == Penta)  // SOLO: every held fret sounds together, like strings
             {
                 if (combo != 0)
                 {
@@ -948,6 +969,19 @@ void GuitarService::step(const uint8_t* d, int len)
                     ringFret = -1;  // the open root follows the strum bar
                     beginGem(0, false);
                     announce(noteName(pn));
+                }
+            }
+            else  // CHART: the held frets as Clone Hero lane notes, no roll; an open strum charts nothing
+            {
+                if (combo != 0)
+                {
+                    for (int i = 0; i < 5; ++i)
+                        if (combo & (1 << i))
+                            for (int base : kChartLanes)
+                                noteOn(base + i, vel);
+                    chartHeld = combo;
+                    beginGem(combo, false);
+                    announceFrets(combo);
                 }
             }
         }
@@ -987,7 +1021,7 @@ void GuitarService::step(const uint8_t* d, int len)
             }
         }
     }
-    else  // SOLO: each note sounds while ITS fret is held, like strings
+    else if (mode == Penta)  // SOLO: each note sounds while ITS fret is held, like strings
     {
         if (! ringing.isEmpty())
         {
@@ -1010,6 +1044,24 @@ void GuitarService::step(const uint8_t* d, int len)
             }
             else if (! anyFretted && ringFret < 0 && ! strum)
                 allOff();   // open root follows the bar
+        }
+    }
+    else  // CHART: a lane note lasts exactly while its fret is held
+    {
+        if (chartHeld != 0)
+        {
+            for (int i = 0; i < 5; ++i)
+                if ((chartHeld & (1 << i)) && ! (combo & (1 << i)))
+                {
+                    for (int base : kChartLanes)
+                    {
+                        sendMsg(juce::MidiMessage::noteOff(1, base + i));
+                        ringing.removeValue(base + i);
+                    }
+                    chartHeld &= ~(1 << i);
+                }
+            if (chartHeld == 0)
+                endGem();
         }
     }
 
