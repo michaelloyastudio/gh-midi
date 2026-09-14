@@ -27,7 +27,17 @@ STAGE.mkdir(parents=True)
 for src in [BUILT / 'VST3/GH MIDI.vst3', BUILT / 'Standalone/GH MIDI.app']:
     if not src.exists():
         sys.exit(f'missing build: {src}\nrun: cmake --build plugin/build -j8')
-    shutil.copytree(src, STAGE / src.name, symlinks=True)
+    dst = STAGE / src.name
+    shutil.copytree(src, dst, symlinks=True)
+    # The build only carries the linker's ad-hoc signature on the arm64 slice
+    # and no bundle seal. Sign the whole bundle (both slices, all resources)
+    # so macOS treats it as a coherent app rather than "not signed at all".
+    # Ad-hoc until there is a Developer ID; then this becomes --sign "Developer ID Application: ...".
+    subprocess.run(['codesign', '--force', '--deep', '--sign', '-', str(dst)], check=True,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.run(['codesign', '--verify', '--deep', '--strict', str(dst)], check=True)
+    for arch in ('arm64', 'x86_64'):
+        subprocess.run(['codesign', '--verify', '--arch', arch, str(dst)], check=True)
 
 for doc in ['README.txt', 'GH MIDI Guide.pdf']:
     p = REL / doc
@@ -53,6 +63,7 @@ for p in sorted(STAGE.iterdir()):
 # Sanity: the things that have silently shipped wrong before.
 app = STAGE / 'GH MIDI.app'
 print('icon     :', 'YES' if (app / 'Contents/Resources/Icon.icns').exists() else 'MISSING')
+print('signed   : ad-hoc, both slices, verified')
 plist = subprocess.run(['plutil', '-p', str(app / 'Contents/Info.plist')],
                        capture_output=True, text=True).stdout
 print('bluetooth:', 'YES' if 'NSBluetoothAlwaysUsageDescription' in plist else 'MISSING')
