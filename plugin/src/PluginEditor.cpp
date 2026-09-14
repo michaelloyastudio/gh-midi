@@ -35,11 +35,7 @@ juce::Rectangle<int> panelBounds(int W, int H)
 }
 juce::Rectangle<int> helpBounds(int W, int H)
 {
-    return { W / 2 - 230, H / 2 - 215, 460, 430 };
-}
-juce::Rectangle<int> mapBounds(int W, int H)
-{
-    return { W / 2 - 250, H / 2 - 200, 500, 400 };
+    return { W / 2 - 230, H / 2 - 205, 460, 410 };
 }
 // bottom row: MODE / STRUM / KEY / OCTAVE plate — label row, value row with
 // arrows, then a badge naming the guitar control (minus and plus side by side)
@@ -61,13 +57,9 @@ GHMidiEditor::GHMidiEditor(GHMidiProcessor& p)
     context.attachTo(*this);
 
     addAndMakeVisible(gearBtn);
-    gearBtn.onClick = [this] { setHelpVisible(false); setMapVisible(false); setPanelVisible(! panelOpen); };
+    gearBtn.onClick = [this] { setHelpVisible(false); setPanelVisible(! panelOpen); };
     addAndMakeVisible(helpBtn);
-    helpBtn.onClick = [this] { setPanelVisible(false); setMapVisible(false); setHelpVisible(! helpOpen); };
-    addAndMakeVisible(mapBtn);
-    mapBtn.onClick = [this] { setPanelVisible(false); setHelpVisible(false); setMapVisible(! mapOpen); };
-    addChildComponent(mapCloseBtn);
-    mapCloseBtn.onClick = [this] { setMapVisible(false); };
+    helpBtn.onClick = [this] { setPanelVisible(false); setHelpVisible(! helpOpen); };
 
     // sustain selector: a radio pair, the active side in gold
     sustainLabel.setText("SUSTAIN", juce::dontSendNotification);
@@ -254,17 +246,9 @@ void GHMidiEditor::setHelpVisible(bool visible)
     repaint();
 }
 
-void GHMidiEditor::setMapVisible(bool visible)
-{
-    mapOpen = visible;
-    mapCloseBtn.setVisible(visible);
-    updateHudButtons();
-    repaint();
-}
-
 void GHMidiEditor::updateHudButtons()
 {
-    const bool show = ! panelOpen && ! helpOpen && ! mapOpen;
+    const bool show = ! panelOpen && ! helpOpen;
     for (auto* c : std::initializer_list<juce::Component*> {
              &modePrev, &modeNext, &strumPrev, &strumNext, &keyPrev, &keyNext, &octPrev, &octNext })
         c->setVisible(show);
@@ -325,14 +309,10 @@ void GHMidiEditor::timerCallback()
             case 75:  saveHudSnapshot("solo_maxoct"); break;
             case 77:  svc.uiMode = 3; svc.uiButtonBits = 0; svc.announceFrets(0x03); break;
             case 79:  saveHudSnapshot("chart"); break;
-            case 82:  svc.uiMode = 0; svc.uiKey = 7; svc.uiEasyOct = 0; svc.uiFretBits = 0x03; setMapVisible(true); break;
-            case 88:  saveHudSnapshot("map_chords"); break;
-            case 90:  svc.uiMode = 1; svc.uiKey = 0; svc.uiOctave = 0; svc.uiFretBits = 5; break;
-            case 96:  saveHudSnapshot("map_notes"); break;
-            case 98:  svc.uiFretBits = 0; setMapVisible(false); setHelpVisible(true); break;
-            case 106: saveHudSnapshot("help"); break;
-            case 108: setHelpVisible(false); setPanelVisible(true); break;
-            case 116: saveHudSnapshot("settings"); break;
+            case 82:  setHelpVisible(true); break;
+            case 90:  saveHudSnapshot("help"); break;
+            case 95:  setHelpVisible(false); setPanelVisible(true); break;
+            case 105: saveHudSnapshot("settings"); break;
             case 135: juce::JUCEApplicationBase::quit(); break;
             default: break;
         }
@@ -381,11 +361,6 @@ void GHMidiEditor::resized()
     highway.setViewSize(getWidth(), getHeight());
     gearBtn.setBounds(getWidth() - 104, 16, 92, 28);
     helpBtn.setBounds(getWidth() - 140, 16, 30, 28);
-    mapBtn.setBounds(getWidth() - 196, 16, 50, 28);
-    {
-        const auto mb = mapBounds(getWidth(), getHeight());
-        mapCloseBtn.setBounds(mb.getRight() - 40, mb.getY() + 12, 28, 26);
-    }
     // SUSTAIN  [FRET][STRUM]  -- flush right with SETTINGS, one row below it
     sustainStrumBtn.setBounds(getWidth() - 104 + 46, 50, 46, 22);
     sustainFretBtn.setBounds(getWidth() - 104, 50, 46, 22);
@@ -612,7 +587,6 @@ void GHMidiEditor::paint(juce::Graphics& g)
         line("PLUS", "tap through strum speeds (0-50ms)");
         line("JOYSTICK", "left/right = key - up/down = octave");
         line("ON SCREEN", "the bottom arrows do all of the above too");
-        line("MAP", "every fret shape in this mode and key, live");
         rowY += 8;
         section("MODES");
         line("CHORDS", "every fret is a chord in your key. can't miss", 70);
@@ -620,128 +594,5 @@ void GHMidiEditor::paint(juce::Graphics& g)
         line("NOTES", "fret combos pick all 32 notes. full control", 70);
         line("CHART", "frets = Clone Hero lanes. record a rough chart", 70);
     }
-    else if (mapOpen)
-    {
-        // MAP: every fret shape the current mode can play, named for the current key,
-        // GHMix-style: five gem tabs per row, the held shape's row lit
-        const auto mb = mapBounds(getWidth(), getHeight());
-        const int mode = proc.guitar().uiMode.load() % 4;
-        const int key = proc.guitar().uiKey.load() % 12;
-        const int oct = mode == 0 ? proc.guitar().uiEasyOct.load() : proc.guitar().uiOctave.load();
-        const int held = proc.guitar().uiFretBits.load();
-        auto label = [&](int mask) { return GuitarService::comboLabel(mode, mask, key, oct); };
-        auto noteNm = [&](int n) { return juce::String(keyNames[n % 12]) + juce::String(n / 12 - 1); };
 
-        drawOverlayFrame(mb.toFloat(), juce::String("MAP  ") + modeNames[mode]);
-        juce::String sub;
-        if (mode == 1)
-            sub = "base " + noteNm(40 + key + oct) + "  ·  G=1  R=2  Y=4  B=8  O=16, add up = semitones above base";
-        else if (mode == 3)
-            sub = "Clone Hero lanes  ·  expert · hard · medium · easy";
-        else
-            sub = "key of " + juce::String(keyNames[key]) + (oct != 0 ? "  ·  octave " + juce::String(oct > 0 ? "+" : "") + juce::String(oct / 12) : juce::String());
-        g.setColour(juce::Colours::white.withAlpha(0.45f));
-        g.setFont(juce::Font(juce::FontOptions(11.0f)));
-        g.drawText(sub, mb.getX() + 20, mb.getY() + 42, mb.getWidth() - 40, 14, juce::Justification::left);
-
-        auto tabs = [&](int x, int y, int mask)
-        {
-            for (int i = 0; i < 5; ++i)
-            {
-                juce::Path p;
-                p.addRoundedRectangle((float) (x + i * 12), (float) y, 9.0f, 15.0f, 2.5f, 2.5f, false, false, true, true);
-                g.setColour((mask & (1 << i)) ? gemColours[i] : juce::Colour(0xff2b2b36));
-                g.fillPath(p);
-            }
-        };
-        auto row = [&](int x, int y, int w, int mask, const juce::String& text, bool hi)
-        {
-            if (hi)
-            {
-                g.setColour(gold.withAlpha(0.18f));
-                g.fillRoundedRectangle((float) x - 6.0f, (float) y - 4.0f, (float) w, 23.0f, 4.0f);
-            }
-            tabs(x, y, mask);
-            g.setColour(juce::Colours::white.withAlpha(hi ? 0.95f : 0.85f));
-            g.setFont(juce::Font(juce::FontOptions(12.5f)));
-            g.drawText(text, x + 68, y - 2, w - 74, 18, juce::Justification::left);
-        };
-        auto header = [&](int x, int y, const juce::String& s)
-        {
-            g.setColour(juce::Colours::white.withAlpha(0.38f));
-            g.setFont(juce::Font(juce::FontOptions(9.0f, juce::Font::bold)));
-            g.drawText(s, x, y, 300, 10, juce::Justification::left);
-        };
-        auto footnote = [&](const juce::String& s)
-        {
-            g.setColour(juce::Colours::white.withAlpha(0.4f));
-            g.setFont(juce::Font(juce::FontOptions(11.0f)));
-            g.drawText(s, mb.getX() + 30, mb.getBottom() - 54, mb.getWidth() - 60, 14, juce::Justification::left);
-        };
-        const int top = mb.getY() + 74;
-        if (mode == 0)
-        {
-            const int hiMask = held != 0 ? GuitarService::easyRowMask(held) : -1;
-            int x = mb.getX() + 30, y = top;
-            header(x, y, "ONE FRET");
-            y += 18;
-            for (int m : { 1, 2, 4, 8, 16 })
-            {
-                row(x, y, 210, m, label(m), hiMask == m);
-                y += 25;
-            }
-            row(x, y, 210, 0, label(0) + "   open, low", false);
-            x = mb.getX() + 268;
-            y = top;
-            header(x, y, "TWO FRETS");
-            y += 18;
-            for (int m : { 3, 6, 12, 24, 5, 20, 10, 9, 18 })
-            {
-                row(x, y, 210, m, label(m), hiMask == m);
-                y += 25;
-            }
-            footnote("any other shape plays its highest fret's chord");
-        }
-        else if (mode == 1)
-        {
-            for (int n = 0; n < 32; ++n)
-            {
-                const int x = mb.getX() + 24 + (n / 8) * 114;
-                const int y = top + (n % 8) * 26;
-                row(x, y, 110, n, label(n), held == n);
-            }
-            footnote("frets change silently until the next strum");
-        }
-        else if (mode == 2)
-        {
-            static const char* deg[] = { "1", "2", "3", "5", "6" };
-            int x = mb.getX() + 30, y = top;
-            header(x, y, "FRET   SCALE STEP   NOTE");
-            y += 18;
-            for (int i = 0; i < 5; ++i)
-            {
-                row(x, y, 260, 1 << i, juce::String(deg[i]) + "      " + label(1 << i), held == (1 << i));
-                y += 25;
-            }
-            row(x, y, 260, 0, "open   " + label(0), false);
-            footnote("hold several and strum: they all sound, and each stops when its fret lifts");
-        }
-        else
-        {
-            int x = mb.getX() + 30, y = top;
-            header(x, y, "LANE");
-            header(x + 150, y, "EXPERT     HARD     MEDIUM     EASY");
-            y += 18;
-            for (int i = 0; i < 5; ++i)
-            {
-                row(x, y, 420, 1 << i, label(1 << i), (held & (1 << i)) != 0);
-                g.setColour(juce::Colours::white.withAlpha(0.6f));
-                g.setFont(juce::Font(juce::FontOptions(12.0f)));
-                g.drawText(juce::String(96 + i) + "            " + juce::String(84 + i) + "            " + juce::String(72 + i) + "            " + juce::String(60 + i),
-                           x + 150, y - 2, 260, 18, juce::Justification::left);
-                y += 25;
-            }
-            footnote("all four difficulties are written at once");
-        }
-    }
 }

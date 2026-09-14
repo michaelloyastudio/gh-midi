@@ -116,10 +116,6 @@ public:
     juce::String describeMapping(int target) const;
     static juce::String targetName(int target);
 
-    // ---- fret-shape labels for the on-screen MAP (pure functions of the same tables the engine plays from) ----
-    static juce::String comboLabel(int mode, int mask, int key, int octaveSemis);
-    static int easyRowMask(int mask);   // CHORDS: the row a held shape actually plays (unmapped -> top fret)
-
     void requestSave() { saveRequest = true; notify(); }
 
     juce::String getLastPlayed() const

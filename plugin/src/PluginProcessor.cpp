@@ -705,57 +705,6 @@ void GuitarService::learnTick(const uint8_t* d, int len, double now)
     }
 }
 
-// ---------- labels for the MAP overlay ----------
-juce::String GuitarService::comboLabel(int md, int mask, int key, int oct)
-{
-    switch (md)
-    {
-        case Easy:
-        {
-            if (mask == 0)
-                return noteName(kBassBase + key + oct);
-            ChordDef cd;
-            int m = easyRowMask(mask);
-            if (m == 0 || ! chordForMask(m, cd))
-                return {};
-            return juce::String(noteNames[(kChordRootBase + key + oct + cd.rootOff) % 12]) + cd.suffix;
-        }
-        case Real:
-            return noteName(kRealBase + key + oct + mask);
-        case Penta:
-        {
-            if (mask == 0)
-                return noteName(pentaNote(key, oct, -1));
-            juce::String s;
-            for (int i = 0; i < 5; ++i)
-                if (mask & (1 << i))
-                    s += (s.isEmpty() ? juce::String() : juce::String("+")) + juce::String(noteNames[pentaNote(key, oct, i) % 12]);
-            return s;
-        }
-        default:
-        {
-            static const char* names[] = { "green", "red", "yellow", "blue", "orange" };
-            for (int i = 0; i < 5; ++i)
-                if (mask == (1 << i))
-                    return names[i];
-            return {};
-        }
-    }
-}
-
-int GuitarService::easyRowMask(int mask)
-{
-    if (mask == 0)
-        return 0;
-    ChordDef cd;
-    if (chordForMask(mask, cd))
-        return mask;
-    for (int i = 4; i >= 0; --i)
-        if (mask & (1 << i))
-            return 1 << i;
-    return 0;
-}
-
 // ---------- mode / key / octave (guitar thread only) ----------
 void GuitarService::cycleMode(int dir)
 {

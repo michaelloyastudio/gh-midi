@@ -16,7 +16,6 @@ private:
     void timerCallback() override;
     void setPanelVisible(bool visible);
     void setHelpVisible(bool visible);
-    void setMapVisible(bool visible);
     void updateHudButtons();
     void refreshDeviceBox();
     void refreshMappingRows();
@@ -25,9 +24,9 @@ private:
     HighwayRenderer highway;
     juce::OpenGLContext context;
 
-    bool panelOpen = false, helpOpen = false, mapOpen = false;
+    bool panelOpen = false, helpOpen = false;
 
-    juce::TextButton gearBtn { "SETTINGS" }, helpBtn { "?" }, mapBtn { "MAP" }, mapCloseBtn { "X" };
+    juce::TextButton gearBtn { "SETTINGS" }, helpBtn { "?" };
 
     // which control decides how long a note lasts: the fret (default) or the
     // strum bar. Lives on the main view under ? / SETTINGS, not in the panel.
