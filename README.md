@@ -29,6 +29,9 @@ through strum speeds, the joystick changes key (left/right) and octave
 controllers without a joystick. Any HID controller can be mapped
 from the in-plugin settings (per-control LEARN, live input testing).
 
+**MAP** (top right) shows every fret shape the current mode can play, named for
+the current key, and lights the row you're holding.
+
 **No DAW required.** The release also ships a standalone macOS app: while it
 runs, every DAW and synth app on the Mac sees a MIDI input called "GH MIDI"
 (Logic, GarageBand, Ableton, FL, Reaper, ...). Run either the app or the

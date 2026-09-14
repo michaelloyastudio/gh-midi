@@ -71,6 +71,7 @@ public:
     // ---- settings (all persisted) ----
     std::atomic<int> whammyMode { 0 };      // 0 = bend + CC20, 1 = bend, 2 = CC20
     std::atomic<bool> virtualMidiOn { true };
+    std::atomic<bool> strumSustain { false }; // on: a note lasts while the strum BAR is held, not the fret
     std::atomic<int> strumRollMs { 10 };   // ms between rolled chord notes (0 = off)  // "GH MIDI" virtual source for DAW note recording
 
     // ---- state-restore requests (picked up by the guitar thread) ----
@@ -114,6 +115,10 @@ public:
     void clearMapping(int target);
     juce::String describeMapping(int target) const;
     static juce::String targetName(int target);
+
+    // ---- fret-shape labels for the on-screen MAP (pure functions of the same tables the engine plays from) ----
+    static juce::String comboLabel(int mode, int mask, int key, int octaveSemis);
+    static int easyRowMask(int mask);   // CHORDS: the row a held shape actually plays (unmapped -> top fret)
 
     void requestSave() { saveRequest = true; notify(); }
 
@@ -204,6 +209,8 @@ private:
     int chartHeld = 0;                         // CHART: frets whose lane notes are sounding
     int candCombo = -1;
     double candSince = 0.0;
+    double sustainOnAt = -1.0;       // strum-sustain: when the ringing notes started
+    bool sustainOffPending = false;  // strum-sustain: bar released before the minimum, off owed
     double lastLegatoAt = -1.0;
     int joyPos = 0, joyPosY = 0;
     float prevWham = 0.0f;

@@ -14,6 +14,9 @@ constexpr int kVelDown = 100, kVelUp = 78;
 // CHART mode: Clone Hero / Rock Band PART GUITAR lanes, green..orange = base..base+4,
 // one base per difficulty (Easy, Medium, Hard, Expert). Every difficulty is written at once.
 constexpr int kChartLanes[4] = { 60, 72, 84, 96 };
+// strum-sustain: a bar tap can be 20-30ms of contact, which as a MIDI note is
+// a click. The off is held back so a flick still sounds like a note.
+constexpr double kMinSustainS = 0.08;
 
 const char* noteNames[12] = { "C","C#","D","D#","E","F","F#","G","G#","A","A#","B" };
 
@@ -175,6 +178,7 @@ void GuitarService::loadSettings()
         hammerOn = get("hammer", 0) != 0;
         whammyMode = juce::jlimit(0, 2, get("whammyMode", 0));
         virtualMidiOn = get("virtualMidi", 1) != 0;
+        strumSustain = get("strumSustain", 0) != 0;
         strumRollMs = juce::jlimit(0, 50, get("strumRoll", 10));
         if (v["controllers"].isObject())
             controllersVar = v["controllers"];
@@ -207,6 +211,7 @@ void GuitarService::saveSettings()
     o->setProperty("hammer", hammerOn.load() ? 1 : 0);
     o->setProperty("whammyMode", whammyMode.load());
     o->setProperty("virtualMidi", virtualMidiOn.load() ? 1 : 0);
+    o->setProperty("strumSustain", strumSustain.load() ? 1 : 0);
     o->setProperty("strumRoll", strumRollMs.load());
     o->setProperty("controllers", controllersVar);
 
@@ -700,6 +705,57 @@ void GuitarService::learnTick(const uint8_t* d, int len, double now)
     }
 }
 
+// ---------- labels for the MAP overlay ----------
+juce::String GuitarService::comboLabel(int md, int mask, int key, int oct)
+{
+    switch (md)
+    {
+        case Easy:
+        {
+            if (mask == 0)
+                return noteName(kBassBase + key + oct);
+            ChordDef cd;
+            int m = easyRowMask(mask);
+            if (m == 0 || ! chordForMask(m, cd))
+                return {};
+            return juce::String(noteNames[(kChordRootBase + key + oct + cd.rootOff) % 12]) + cd.suffix;
+        }
+        case Real:
+            return noteName(kRealBase + key + oct + mask);
+        case Penta:
+        {
+            if (mask == 0)
+                return noteName(pentaNote(key, oct, -1));
+            juce::String s;
+            for (int i = 0; i < 5; ++i)
+                if (mask & (1 << i))
+                    s += (s.isEmpty() ? juce::String() : juce::String("+")) + juce::String(noteNames[pentaNote(key, oct, i) % 12]);
+            return s;
+        }
+        default:
+        {
+            static const char* names[] = { "green", "red", "yellow", "blue", "orange" };
+            for (int i = 0; i < 5; ++i)
+                if (mask == (1 << i))
+                    return names[i];
+            return {};
+        }
+    }
+}
+
+int GuitarService::easyRowMask(int mask)
+{
+    if (mask == 0)
+        return 0;
+    ChordDef cd;
+    if (chordForMask(mask, cd))
+        return mask;
+    for (int i = 4; i >= 0; --i)
+        if (mask & (1 << i))
+            return 1 << i;
+    return 0;
+}
+
 // ---------- mode / key / octave (guitar thread only) ----------
 void GuitarService::cycleMode(int dir)
 {
@@ -885,6 +941,8 @@ void GuitarService::step(const uint8_t* d, int len)
             const int vel = latchVel;
             allOff();
             candCombo = -1;
+            sustainOnAt = now;
+            sustainOffPending = false;
             if (mode == Easy)
             {
                 if (combo != 0)
@@ -988,7 +1046,30 @@ void GuitarService::step(const uint8_t* d, int len)
     }
 
     // release / legato
-    if (mode == Easy)
+    if (strumSustain.load())
+    {
+        // STRUM CONTROLS SUSTAIN: whatever is ringing lasts exactly while the
+        // strum bar is held, in every mode. Frets are free to change
+        // underneath for the next chord without cutting this one. A flick is
+        // still a note: the off waits until kMinSustainS after the on.
+        if (! ringing.isEmpty())
+        {
+            if (! strum || sustainOffPending)
+            {
+                if (now - sustainOnAt >= kMinSustainS)
+                {
+                    allOff();
+                    ringFret = ringCombo = -1;
+                    sustainOffPending = false;
+                }
+                else
+                    sustainOffPending = true;
+            }
+        }
+        else
+            sustainOffPending = false;
+    }
+    else if (mode == Easy)
     {
         // a chord sounds exactly while its frets are held; the open bass
         // exactly while the strum bar is held

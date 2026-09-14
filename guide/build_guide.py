@@ -251,18 +251,19 @@ def p_controller():
 <p>The WUSBMote only finds the guitar <b>when it gets power</b>. If the screen says <i>adapter can't see the guitar</i>: unplug USB, seat the guitar plug, plug USB back in.</p>"""
 
 def p_screen():
-    callouts = [(73, 5, 1), (57, 12, 2), (50, 58, 3), (12, 92, 4), (37, 92, 5), (62, 92, 6), (87, 92, 7)]
+    callouts = [(68, 5, 1), (57, 14, 2), (50, 58, 3), (12, 92, 4), (37, 92, 5), (62, 92, 6), (87, 92, 7), (69, 10.5, 8)]
     dots = "".join(f'<span class="callout" style="left:{x}%;top:{y}%">{n}</span>' for x, y, n in callouts)
     return h2("05", "The screen") + f"""
 <div class="shotwrap mid"><img class="shot" src="assets/ui-chords.jpg" alt="">{dots}</div>
 <table class="legend">
-<tr><td><span class="cn">1</span></td><td><b>? and SETTINGS</b> — quick controls reminder, and the settings panel.</td></tr>
+<tr><td><span class="cn">1</span></td><td><b>MAP, ? and SETTINGS</b> — every fret shape for this mode and key, a quick controls reminder, and the settings panel.</td></tr>
 <tr><td><span class="cn">2</span></td><td><b>What you played</b> — the chord or note name, and every setting change.</td></tr>
 <tr><td><span class="cn">3</span></td><td><b>The highway</b> — your notes travel away as gems. Held notes trail; the whammy wiggles them.</td></tr>
-<tr><td><span class="cn">4</span></td><td><b>MODE</b> — CHORDS, NOTES or SOLO. Arrows or minus.</td></tr>
+<tr><td><span class="cn">4</span></td><td><b>MODE</b> — CHORDS, NOTES, SOLO or CHART. Arrows or minus.</td></tr>
 <tr><td><span class="cn">5</span></td><td><b>STRUM SPREAD</b> — milliseconds between the notes of a strum. 0 = stab, 30+ = slow sweep. Arrows or plus.</td></tr>
 <tr><td><span class="cn">6</span></td><td><b>KEY</b> — the key everything is built in. In NOTES this reads <b>BASE</b>, the lowest note. Arrows or joystick left / right.</td></tr>
 <tr><td><span class="cn">7</span></td><td><b>OCTAVE</b> — −3 to +3. Arrows or joystick up / down.</td></tr>
+<tr><td><span class="cn">8</span></td><td><b>SUSTAIN</b> — FRET: a note lasts while its fret is held. STRUM: while the strum bar is held.</td></tr>
 </table>
 <p class="muted">The gold tag under each setting is the guitar control that changes it. It lights up while you touch that control.</p>"""
 
@@ -325,7 +326,9 @@ def p_chords():
 </table>
 <p class="muted" style="margin-top:6pt">Any other combination plays the highest fret's chord.</p>
 </div>
-</div>"""
+</div>
+<p class="muted" style="margin-top:8pt">The <b>MAP</b> button shows this table live, in whatever key you're in, and lights the row you're holding.</p>
+<img class="shot small" src="assets/ui-map.jpg" alt="">"""
 
 def p_songs():
     progs = [
