@@ -23,6 +23,12 @@ SETUP
       Click Done. Then:
           System Settings > Privacy & Security > scroll down > Open Anyway
       Once. It opens normally after that.
+      No "Open Anyway", it does nothing, or macOS calls the app "damaged"?
+      Open Terminal (Cmd+Space, type Terminal) and paste this, with the
+      space at the end:
+          xattr -dr com.apple.quarantine 
+      then DRAG GH MIDI.app into the Terminal window and press Return.
+      Open the app again - it works from then on.
 
   3.  Plug in the guitar. Open something that makes sound, pick an
       instrument, set its MIDI input to "GH MIDI". Play.
