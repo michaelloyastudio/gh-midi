@@ -82,6 +82,25 @@ GuitarService::GuitarService() : juce::Thread("gh-guitar-poll")
 
     demoMode = std::getenv("GHMIDI_DEMO") != nullptr
                && juce::JUCEApplicationBase::isStandaloneApp();
+    if (demoMode)
+    {
+        // headless verification (CI has no Windows machine to watch): milestones
+        // go to a log next to the snapshots, and a crash leaves a backtrace there
+        const char* dir = std::getenv("GHMIDI_HUDSNAP");
+        if (dir == nullptr) dir = std::getenv("GHMIDI_SNAPSHOT");
+        const auto logFile = (dir != nullptr ? juce::File(juce::String(dir))
+                                             : juce::File::getSpecialLocation(juce::File::tempDirectory))
+                                 .getChildFile("ghmidi_demo.log");
+        logFile.deleteFile();
+        demoLogger = std::make_unique<juce::FileLogger>(logFile, "GH MIDI demo mode");
+        juce::Logger::setCurrentLogger(demoLogger.get());
+        juce::SystemStats::setApplicationCrashHandler([](void*)
+        {
+            juce::Logger::writeToLog("CRASH\n" + juce::SystemStats::getStackBacktrace());
+        });
+        juce::Logger::writeToLog("service: " + juce::SystemStats::getOperatingSystemName() + ", exe "
+                                 + juce::File::getSpecialLocation(juce::File::currentExecutableFile).getFullPathName());
+    }
 
     const auto exe = juce::File::getSpecialLocation(juce::File::currentExecutableFile)
                          .getFileNameWithoutExtension();
@@ -93,6 +112,11 @@ GuitarService::GuitarService() : juce::Thread("gh-guitar-poll")
 GuitarService::~GuitarService()
 {
     stopThread(-1);  // never force-kill: hidapi teardown must finish on its thread
+    if (demoLogger != nullptr)
+    {
+        juce::Logger::writeToLog("service: shutdown");
+        juce::Logger::setCurrentLogger(nullptr);
+    }
 }
 
 // ---------- settings persistence ----------

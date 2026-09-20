@@ -314,7 +314,7 @@ std::unique_ptr<juce::OpenGLShaderProgram> makeProgram(
     auto p = std::make_unique<juce::OpenGLShaderProgram>(ctx);
     if (! p->addVertexShader(vert) || ! p->addFragmentShader(frag))
     {
-        DBG("shader compile failed: " << p->getLastError());
+        juce::Logger::writeToLog("gl: shader compile failed: " + p->getLastError());
         return nullptr;
     }
     int loc = 0;
@@ -322,7 +322,7 @@ std::unique_ptr<juce::OpenGLShaderProgram> makeProgram(
         glBindAttribLocation(p->getProgramID(), (GLuint) loc++, a);
     if (! p->link())
     {
-        DBG("shader link failed: " << p->getLastError());
+        juce::Logger::writeToLog("gl: shader link failed: " + p->getLastError());
         return nullptr;
     }
     return p;
@@ -403,6 +403,13 @@ void HighwayRenderer::newOpenGLContextCreated()
 {
     if (auto* env = std::getenv("GHMIDI_SNAPSHOT"))
         snapshotDir = env;
+    if (std::getenv("GHMIDI_DEMO") != nullptr)   // demo/CI runs: say which GL we got
+    {
+        const auto* ver = glGetString(GL_VERSION);
+        const auto* ren = glGetString(GL_RENDERER);
+        juce::Logger::writeToLog("gl: context created, " + juce::String(ver != nullptr ? (const char*) ver : "?")
+                                 + " / " + juce::String(ren != nullptr ? (const char*) ren : "?"));
+    }
 
     // one VAO for everything (core profile requires one bound)
     GLuint vao = 0;
@@ -521,6 +528,7 @@ void HighwayRenderer::renderOpenGL()
             && ++notReadyFrames >= 90)
         {
             std::cerr << "GHMIDI_SNAPSHOT: renderer not ready (shader build failed)\n";
+            juce::Logger::writeToLog("gl: renderer never became ready (shader build failed), quitting");
             notReadyFrames = -100000;
             juce::MessageManager::callAsync([] { juce::JUCEApplicationBase::quit(); });
         }

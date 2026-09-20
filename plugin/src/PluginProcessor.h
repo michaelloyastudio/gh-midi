@@ -166,6 +166,7 @@ private:
     static juce::File settingsFile();
 
     bool demoMode = false;
+    std::unique_ptr<juce::FileLogger> demoLogger;   // demo mode only: milestones + crash backtrace
     void sendMsg(const juce::MidiMessage& m);
     void noteOn(int note, int vel);
     void allOff();

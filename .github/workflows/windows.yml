@@ -2,8 +2,11 @@ name: Windows build
 
 # There is no Windows machine in this project: GitHub's runners build the
 # VST3 + standalone. Every push to main uploads the release folder as a
-# workflow artifact. A v* tag, or a manual run given a release tag, also
-# attaches the zip to that GitHub release.
+# workflow artifact, then a second job smoke-tests the exe in the app's own
+# demo mode under software OpenGL, collecting a log and a crash dump if it
+# dies. A manual run given a release tag also attaches the zip to that
+# GitHub release; one given an earlier run id skips the build and only
+# smoke-tests that run's artifact.
 
 on:
   push:
@@ -19,16 +22,22 @@ on:
         description: 'Also attach the zip to this GitHub release (e.g. v1.1)'
         required: false
         default: ''
+      smoke_run_id:
+        description: 'Skip the build; smoke-test the artifact of this earlier run id'
+        required: false
+        default: ''
 
 permissions:
   contents: write
+  actions: read
 
 concurrency:
-  group: windows-${{ github.ref }}
+  group: windows-${{ github.ref }}-${{ inputs.smoke_run_id || 'build' }}
   cancel-in-progress: true
 
 jobs:
   build:
+    if: inputs.smoke_run_id == ''
     # windows-latest became the windows-2025-vs2026 image in Sep 2026 (Visual
     # Studio 2026 only). JUCE 8.0.4 is proven on VS 2022, so pin that image.
     runs-on: windows-2022
@@ -64,6 +73,13 @@ jobs:
           path: release/${{ steps.stage.outputs.name }}
           if-no-files-found: error
 
+      - name: Keep the exe's PDB for crash dumps (never shipped)
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-pdb
+          path: plugin/build/GHMidi_artefacts/Release/Standalone/GH MIDI.pdb
+          if-no-files-found: warn
+
       - name: Attach to GitHub release
         if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
         shell: pwsh
@@ -74,34 +90,88 @@ jobs:
           if ($tag -eq '') { $tag = '${{ github.ref_name }}' }
           gh release upload $tag "${{ steps.stage.outputs.zip }}" --clobber
 
-      # Best-effort proof the exe runs: the runner has no GPU, so Mesa's
-      # llvmpipe opengl32.dll sits next to a private copy of the exe, and the
-      # app's own demo mode (GHMIDI_DEMO / GHMIDI_HUDSNAP / GHMIDI_SNAPSHOT)
-      # paints its HUD states to PNGs and quits by itself.
-      - name: Smoke test (demo mode, software OpenGL)
+  smoke:
+    needs: build
+    if: always() && (needs.build.result == 'success' || inputs.smoke_run_id != '')
+    runs-on: windows-2022
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Get the build
+        shell: pwsh
+        run: |
+          $run = '${{ inputs.smoke_run_id }}'
+          if ($run -eq '') { $run = '${{ github.run_id }}' }
+          gh run download $run -R ${{ github.repository }} --pattern 'GH-MIDI-*-Windows' -D dl
+          try { gh run download $run -R ${{ github.repository }} -n windows-pdb -D dl\pdb } catch { Write-Host 'no PDB artifact on that run' }
+          Get-ChildItem -Recurse dl | Select-Object FullName, Length
+
+      - name: Debugger (cdb) for dump analysis
         continue-on-error: true
         shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
+        run: |
+          $cdb = 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\cdb.exe'
+          if (-not (Test-Path $cdb)) { choco install windbg -y --no-progress | Select-String -Pattern 'installed|failed|error' }
+          "cdb present: $(Test-Path $cdb)"
+
+      - name: Run the standalone in demo mode (software OpenGL)
+        shell: pwsh
         run: |
           $t = Join-Path $PWD 'smoke'
           New-Item -ItemType Directory -Force $t | Out-Null
-          Copy-Item "plugin\build\GHMidi_artefacts\Release\Standalone\GH MIDI.exe" $t
+          Copy-Item (Get-ChildItem dl -Recurse -Filter 'GH MIDI.exe' | Select-Object -First 1).FullName $t
+          if (Test-Path dl\pdb\*.pdb) { Copy-Item dl\pdb\*.pdb $t }
+
+          # no GPU on the runner: Mesa's llvmpipe opengl32.dll next to the exe
           gh release download -R pal1000/mesa-dist-win --pattern '*release-msvc.7z' -O mesa.7z
-          7z x mesa.7z -omesa 'x64\*' | Out-Null
+          7z x mesa.7z -omesa 'x64\*' | Select-String -Pattern 'Everything is Ok|ERROR'
           Copy-Item mesa\x64\*.dll $t
-          $env:GALLIUM_DRIVER = 'llvmpipe'   # skip Mesa's D3D12 path on the GPU-less runner
+          "deployed next to the exe:"
+          Get-ChildItem $t | ForEach-Object { "  $($_.Name)  $($_.Length)" }
+
+          # Windows Error Reporting: a minidump for any crash, fast-fails included, no dialog
+          $wer = 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting'
+          New-Item -Path "$wer\LocalDumps" -Force | Out-Null
+          Set-ItemProperty "$wer\LocalDumps" DumpFolder $t
+          Set-ItemProperty "$wer\LocalDumps" DumpType 1 -Type DWord
+          Set-ItemProperty "$wer\LocalDumps" DumpCount 3 -Type DWord
+          Set-ItemProperty $wer DontShowUI 1 -Type DWord
+
+          $env:GALLIUM_DRIVER = 'llvmpipe'
           $env:GHMIDI_DEMO = '1'
           $env:GHMIDI_HUDSNAP = $t
           $env:GHMIDI_SNAPSHOT = $t
           $p = Start-Process -FilePath (Join-Path $t 'GH MIDI.exe') -WorkingDirectory $t -PassThru
           if (-not $p.WaitForExit(120000)) { $p.Kill(); Write-Host '::warning::standalone did not quit on its own' }
-          Write-Host "exit code: $($p.ExitCode)"
-          Get-ChildItem $t\*.png
+          $code = $p.ExitCode
+          "exit code: $code (0x$('{0:X8}' -f $code))"
+          ""
+          "files after the run:"
+          Get-ChildItem $t -Exclude *.dll | ForEach-Object { "  $($_.Name)  $($_.Length)" }
+          ""
+          if (Test-Path "$t\ghmidi_demo.log") { "---- ghmidi_demo.log ----"; Get-Content "$t\ghmidi_demo.log" }
+          if ($code -ne 0) { Write-Host "::error::standalone exited with 0x$('{0:X8}' -f $code)"; exit 1 }
+
+      - name: Analyze crash dump
+        if: always()
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $cdb = 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\cdb.exe'
+          $dmp = Get-ChildItem smoke\*.dmp -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($null -eq $dmp) { "no crash dump"; exit 0 }
+          if (-not (Test-Path $cdb)) { "dump present but no cdb"; exit 0 }
+          $env:_NT_SYMBOL_PATH = "srv*$PWD\sym*https://msdl.microsoft.com/download/symbols;$PWD\smoke"
+          & $cdb -z $dmp.FullName -c '.exr -1; .ecxr; !analyze -v; ~*k; q' 2>&1 | Out-File smoke\cdb.txt
+          Get-Content smoke\cdb.txt | Select-String -Pattern 'ExceptionCode|ExceptionAddress|Parameter\[|FAULTING|FAILURE_BUCKET|STACK_TEXT|SYMBOL_NAME|MODULE_NAME|IMAGE_NAME|ERROR_CODE|EXCEPTION_CODE_STR|^[0-9a-f]{2} [0-9a-f`]+ [0-9a-f`]+ |ucrtbase!|GH_MIDI!|GH MIDI!|opengl32!|libgallium' | ForEach-Object { $_.Line }
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: windows-smoke
-          path: smoke/*.png
+          path: |
+            smoke/*.png
+            smoke/*.log
+            smoke/*.txt
+            smoke/*.dmp
           if-no-files-found: warn

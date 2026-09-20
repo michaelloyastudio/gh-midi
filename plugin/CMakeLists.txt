@@ -73,8 +73,13 @@ target_compile_definitions(GHMidi PRIVATE
     GL_SILENCE_DEPRECATION=1)
 
 if(MSVC)
-    # sources are UTF-8 (comments); MSVC otherwise assumes the system code page
-    target_compile_options(GHMidi PRIVATE /utf-8)
+    # /utf-8: sources are UTF-8 (comments); MSVC otherwise assumes the system
+    # code page. /Zi + /DEBUG: keep a PDB next to the binaries so crash dumps
+    # from the CI smoke test symbolize. The PDB is never shipped.
+    target_compile_options(GHMidi PRIVATE /utf-8 /Zi)
+    foreach(t GHMidi_Standalone GHMidi_VST3)
+        target_link_options(${t} PRIVATE $<$<CONFIG:Release>:/DEBUG /OPT:REF /OPT:ICF>)
+    endforeach()
 endif()
 
 target_link_libraries(GHMidi PRIVATE

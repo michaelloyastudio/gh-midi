@@ -194,7 +194,10 @@ GHMidiEditor::GHMidiEditor(GHMidiProcessor& p)
     };
 
     if (auto* env = std::getenv("GHMIDI_HUDSNAP"); env != nullptr && juce::JUCEApplicationBase::isStandaloneApp())
+    {
         hudSnapDir = env;
+        juce::Logger::writeToLog("editor: created, HUD snapshots -> " + hudSnapDir);
+    }
 
     setSize(720, 620);
     startTimerHz(30);
@@ -212,6 +215,7 @@ void GHMidiEditor::saveHudSnapshot(const juce::String& name)
     juce::FileOutputStream os(file);
     if (os.openedOk())
         juce::PNGImageFormat().writeImageToStream(img, os);
+    juce::Logger::writeToLog("hud: " + name + (os.openedOk() ? " saved " : " FAILED ") + file.getFullPathName());
 }
 
 GHMidiEditor::~GHMidiEditor()
@@ -340,6 +344,7 @@ void GHMidiEditor::timerCallback()
         auto& svc = proc.guitar();
         switch (++hudSnapTick)
         {
+            case 1:   juce::Logger::writeToLog("hud: window showing, tour started"); break;
             case 45:  saveHudSnapshot("chords"); break;
             case 50:  svc.uiMode = 1; svc.uiKey = 7; svc.uiOctave = 12; break;
             case 60:  saveHudSnapshot("notes"); break;
@@ -354,7 +359,7 @@ void GHMidiEditor::timerCallback()
             case 90:  saveHudSnapshot("help"); break;
             case 95:  setHelpVisible(false); setPanelVisible(true); break;
             case 105: saveHudSnapshot("settings"); break;
-            case 135: juce::JUCEApplicationBase::quit(); break;
+            case 135: juce::Logger::writeToLog("hud: tour done, quitting"); juce::JUCEApplicationBase::quit(); break;
             default: break;
         }
     }
