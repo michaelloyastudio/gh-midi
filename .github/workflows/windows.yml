@@ -186,4 +186,4 @@ jobs:
           7z l $zip
           $tag = '${{ inputs.release_tag }}'
           if ($tag -eq '') { $tag = '${{ github.ref_name }}' }
-          gh release upload $tag $zip --clobber
+          gh release upload $tag $zip --clobber -R ${{ github.repository }}   # no checkout in this job
