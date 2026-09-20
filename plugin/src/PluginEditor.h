@@ -42,6 +42,11 @@ private:
     juce::ComboBox deviceBox;
     juce::TextButton rescanBtn { "RESCAN" }, closeBtn { "X" };
     juce::ToggleButton vmidiToggle { "Virtual MIDI output (record notes in your DAW)" };
+    // Windows only (no virtual MIDI ports there): pick a real port instead
+    juce::Label midiOutLabel;
+    juce::ComboBox midiOutBox;
+    juce::Array<juce::MidiDeviceInfo> shownMidiOuts;
+    void refreshMidiOutBox();
     juce::OwnedArray<juce::Label> rowNames, rowDescs;
     juce::OwnedArray<juce::TextButton> rowLearn, rowClear;
 

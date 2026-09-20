@@ -3,9 +3,16 @@ project(GHMidi VERSION 1.1.0)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-# universal binary so Intel Macs can run it too
-set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64")
-set(CMAKE_OSX_DEPLOYMENT_TARGET "10.13" CACHE STRING "" FORCE)
+if(APPLE)
+    # universal binary so Intel Macs can run it too
+    set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64")
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "10.13" CACHE STRING "" FORCE)
+    set(GHMIDI_COPY_AFTER_BUILD TRUE)    # drop the VST3 into ~/Library/Audio/Plug-Ins
+else()
+    # Windows: the system VST3 folder needs admin; the GitHub Actions workflow
+    # (.github/workflows/windows.yml) zips the artefacts instead
+    set(GHMIDI_COPY_AFTER_BUILD FALSE)
+endif()
 
 include(FetchContent)
 FetchContent_Declare(JUCE
@@ -48,7 +55,7 @@ juce_add_plugin(GHMidi
     ICON_BIG "assets/icon.png"
     BLUETOOTH_PERMISSION_ENABLED TRUE
     BLUETOOTH_PERMISSION_TEXT "GH MIDI needs Bluetooth only if you want to connect a Bluetooth MIDI device. The guitar itself connects over USB."
-    COPY_PLUGIN_AFTER_BUILD TRUE)
+    COPY_PLUGIN_AFTER_BUILD ${GHMIDI_COPY_AFTER_BUILD})
 
 target_sources(GHMidi PRIVATE
     src/PluginProcessor.cpp
@@ -64,6 +71,11 @@ target_compile_definitions(GHMidi PRIVATE
     JUCE_USE_CURL=0
     JUCE_VST3_CAN_REPLACE_VST2=0
     GL_SILENCE_DEPRECATION=1)
+
+if(MSVC)
+    # sources are UTF-8 (comments); MSVC otherwise assumes the system code page
+    target_compile_options(GHMidi PRIVATE /utf-8)
+endif()
 
 target_link_libraries(GHMidi PRIVATE
     GHMidiAssets

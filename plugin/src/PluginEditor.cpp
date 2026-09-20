@@ -117,7 +117,26 @@ GHMidiEditor::GHMidiEditor(GHMidiProcessor& p)
             proc.guitar().selectDevice(shownDevices[idx].vid, shownDevices[idx].pid);
     };
     addChildComponent(rescanBtn);
-    rescanBtn.onClick = [this] { proc.guitar().requestDeviceScan(); };
+    rescanBtn.onClick = [this]
+    {
+        proc.guitar().requestDeviceScan();
+        refreshMidiOutBox();
+    };
+
+    // Windows: the panel shows a MIDI OUT picker in place of the virtual-output
+    // toggle. A loopMIDI port makes the app appear as a MIDI input in any DAW,
+    // the way the virtual "GH MIDI" source does on macOS.
+    initLabel(midiOutLabel, "MIDI out");
+    addChildComponent(midiOutBox);
+    midiOutBox.setTextWhenNothingSelected("(none - pick a port, e.g. loopMIDI)");
+    midiOutBox.onChange = [this]
+    {
+        const int id = midiOutBox.getSelectedId();   // 1 = none, 2.. = shownMidiOuts
+        if (id == 1)
+            proc.guitar().selectMidiOutput({}, {});
+        else if (id >= 2 && id - 2 < shownMidiOuts.size())
+            proc.guitar().selectMidiOutput(shownMidiOuts[id - 2].identifier, shownMidiOuts[id - 2].name);
+    };
 
     // mapping table: one row per control, LEARN / CLEAR each
     for (int t = 0; t < GuitarService::LTargetCount; ++t)
@@ -206,9 +225,11 @@ void GHMidiEditor::setPanelVisible(bool visible)
     for (auto* c : { (juce::Component*) &sustainLabel, (juce::Component*) &sustainFretBtn, (juce::Component*) &sustainStrumBtn })
         c->setVisible(! visible && ! helpOpen);
     for (auto* c : std::initializer_list<juce::Component*> {
-             &deviceLabel, &deviceBox, &rescanBtn, &vmidiToggle,
-             &closeBtn, &learnHint })
+             &deviceLabel, &deviceBox, &rescanBtn, &closeBtn, &learnHint })
         c->setVisible(visible);
+    vmidiToggle.setVisible(visible && GuitarService::kHasVirtualMidi);
+    midiOutLabel.setVisible(visible && ! GuitarService::kHasVirtualMidi);
+    midiOutBox.setVisible(visible && ! GuitarService::kHasVirtualMidi);
     for (int t = 0; t < rowNames.size(); ++t)
     {
         rowNames[t]->setVisible(visible);
@@ -220,6 +241,7 @@ void GHMidiEditor::setPanelVisible(bool visible)
     {
         proc.guitar().requestDeviceScan();
         vmidiToggle.setToggleState(proc.guitar().virtualMidiOn.load(), juce::dontSendNotification);
+        refreshMidiOutBox();
         refreshMappingRows();
     }
     else
@@ -280,6 +302,25 @@ void GHMidiEditor::refreshDeviceBox()
     }
     if (selected > 0)
         deviceBox.setSelectedId(selected, juce::dontSendNotification);
+}
+
+void GHMidiEditor::refreshMidiOutBox()
+{
+    if (GuitarService::kHasVirtualMidi)
+        return;
+    shownMidiOuts = juce::MidiOutput::getAvailableDevices();
+    midiOutBox.clear(juce::dontSendNotification);
+    midiOutBox.addItem("(none)", 1);
+    const auto current = proc.guitar().currentMidiOutputId();
+    int selected = current.isEmpty() ? 1 : 0;
+    for (int i = 0; i < shownMidiOuts.size(); ++i)
+    {
+        midiOutBox.addItem(shownMidiOuts[i].name, i + 2);
+        if (shownMidiOuts[i].identifier == current)
+            selected = i + 2;
+    }
+    if (selected > 0)
+        midiOutBox.setSelectedId(selected, juce::dontSendNotification);
 }
 
 void GHMidiEditor::refreshMappingRows()
@@ -406,7 +447,10 @@ void GHMidiEditor::resized()
         r.removeFromTop(2);
     }
     r.removeFromTop(8);
-    vmidiToggle.setBounds(r.removeFromTop(24));
+    auto outRow = r.removeFromTop(24);
+    vmidiToggle.setBounds(outRow);              // macOS / Linux
+    midiOutLabel.setBounds(outRow.removeFromLeft(76));   // Windows
+    midiOutBox.setBounds(outRow);
 
     // help overlay
     auto hb = helpBounds(getWidth(), getHeight());

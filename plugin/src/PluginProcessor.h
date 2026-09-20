@@ -74,6 +74,22 @@ public:
     std::atomic<bool> strumSustain { false }; // on: a note lasts while the strum BAR is held, not the fret
     std::atomic<int> strumRollMs { 10 };   // ms between rolled chord notes (0 = off)  // "GH MIDI" virtual source for DAW note recording
 
+    // ---- MIDI output port ----
+    // macOS/Linux publish a virtual "GH MIDI" source. Windows has no virtual
+    // MIDI ports, so there the settings panel offers a picker instead: a
+    // loopMIDI port to reach a DAW, or any real synth/port.
+#if JUCE_WINDOWS
+    static constexpr bool kHasVirtualMidi = false;
+#else
+    static constexpr bool kHasVirtualMidi = true;
+#endif
+    void selectMidiOutput(const juce::String& identifier, const juce::String& name);  // both empty = none
+    juce::String currentMidiOutputId() const
+    {
+        const juce::ScopedLock sl(midiOutLock);
+        return midiOutId;
+    }
+
     // ---- state-restore requests (picked up by the guitar thread) ----
     std::atomic<int> modeRequest { -1 };
     std::atomic<int> keyRequest { -1 };
@@ -158,6 +174,11 @@ private:
     juce::CriticalSection clientLock;
     juce::Array<juce::MidiMessageCollector*> clients;
     std::unique_ptr<juce::MidiOutput> virtualOut;  // created/destroyed on the guitar thread
+    std::unique_ptr<juce::MidiOutput> portOut;     // user-picked port (guitar thread only)
+    mutable juce::CriticalSection midiOutLock;
+    juce::String midiOutId, midiOutName;           // persisted; guarded by midiOutLock
+    std::atomic<bool> midiOutRequest { false };
+    void openMidiOutput();
 
     hid_device* dev = nullptr;
     int ioMode = 0;        // 1 = get_input_report id 1 · 2 = id 0 · 3 = hid_read stream

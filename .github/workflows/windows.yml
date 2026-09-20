@@ -1,0 +1,104 @@
+name: Windows build
+
+# There is no Windows machine in this project: GitHub's runners build the
+# VST3 + standalone. Every push to main uploads the release folder as a
+# workflow artifact. A v* tag, or a manual run given a release tag, also
+# attaches the zip to that GitHub release.
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+    paths:
+      - 'plugin/**'
+      - 'release/README-Windows.txt'
+      - '.github/workflows/windows.yml'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Also attach the zip to this GitHub release (e.g. v1.1)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S plugin -B plugin/build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build
+        run: cmake --build plugin/build --config Release --parallel
+
+      - name: Stage release folder
+        id: stage
+        shell: pwsh
+        run: |
+          $m = Select-String -Path plugin/CMakeLists.txt -Pattern 'project\(GHMidi VERSION (\d+)\.(\d+)'
+          $ver = "v$($m.Matches[0].Groups[1].Value).$($m.Matches[0].Groups[2].Value)"
+          $name = "GH-MIDI-$ver-Windows"
+          $stage = "release\$name"
+          New-Item -ItemType Directory -Force $stage | Out-Null
+          Copy-Item -Recurse "plugin\build\GHMidi_artefacts\Release\VST3\GH MIDI.vst3" $stage
+          Copy-Item "plugin\build\GHMidi_artefacts\Release\Standalone\GH MIDI.exe" $stage
+          Copy-Item release\README-Windows.txt "$stage\README.txt"
+          Get-ChildItem -Recurse $stage | Select-Object FullName, Length
+          7z a -tzip "release\$name.zip" "$stage\*"
+          "name=$name" >> $env:GITHUB_OUTPUT
+          "zip=release\$name.zip" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.stage.outputs.name }}
+          path: release/${{ steps.stage.outputs.name }}
+          if-no-files-found: error
+
+      - name: Attach to GitHub release
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = '${{ inputs.release_tag }}'
+          if ($tag -eq '') { $tag = '${{ github.ref_name }}' }
+          gh release upload $tag "${{ steps.stage.outputs.zip }}" --clobber
+
+      # Best-effort proof the exe runs: the runner has no GPU, so Mesa's
+      # llvmpipe opengl32.dll sits next to a private copy of the exe, and the
+      # app's own demo mode (GHMIDI_DEMO / GHMIDI_HUDSNAP / GHMIDI_SNAPSHOT)
+      # paints its HUD states to PNGs and quits by itself.
+      - name: Smoke test (demo mode, software OpenGL)
+        continue-on-error: true
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $t = Join-Path $PWD 'smoke'
+          New-Item -ItemType Directory -Force $t | Out-Null
+          Copy-Item "plugin\build\GHMidi_artefacts\Release\Standalone\GH MIDI.exe" $t
+          gh release download -R pal1000/mesa-dist-win --pattern '*release-msvc.7z' -O mesa.7z
+          7z x mesa.7z -omesa 'x64\*' | Out-Null
+          Copy-Item mesa\x64\*.dll $t
+          $env:GHMIDI_DEMO = '1'
+          $env:GHMIDI_HUDSNAP = $t
+          $env:GHMIDI_SNAPSHOT = $t
+          $p = Start-Process -FilePath (Join-Path $t 'GH MIDI.exe') -WorkingDirectory $t -PassThru
+          if (-not $p.WaitForExit(120000)) { $p.Kill(); Write-Host '::warning::standalone did not quit on its own' }
+          Write-Host "exit code: $($p.ExitCode)"
+          Get-ChildItem $t\*.png
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-smoke
+          path: smoke/*.png
+          if-no-files-found: warn

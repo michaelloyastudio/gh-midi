@@ -98,8 +98,14 @@ GuitarService::~GuitarService()
 // ---------- settings persistence ----------
 juce::File GuitarService::settingsFile()
 {
-    return juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
-        .getChildFile("Application Support/GH MIDI/settings.json");
+    // macOS: ~/Library/Application Support/GH MIDI
+    // Windows: %APPDATA%\GH MIDI  ·  Linux: ~/.config/GH MIDI
+#if JUCE_MAC
+    const char* sub = "Application Support/GH MIDI/settings.json";
+#else
+    const char* sub = "GH MIDI/settings.json";
+#endif
+    return juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory).getChildFile(sub);
 }
 
 static void varToMap(const juce::var& v, GuitarService::ControllerMap& m)
@@ -180,6 +186,11 @@ void GuitarService::loadSettings()
         virtualMidiOn = get("virtualMidi", 1) != 0;
         strumSustain = get("strumSustain", 0) != 0;
         strumRollMs = juce::jlimit(0, 50, get("strumRoll", 10));
+        {
+            const juce::ScopedLock sl(midiOutLock);
+            midiOutId = v["midiOut"].toString();
+            midiOutName = v["midiOutName"].toString();
+        }
         if (v["controllers"].isObject())
             controllersVar = v["controllers"];
         else if (v.hasProperty("fretG"))
@@ -213,6 +224,11 @@ void GuitarService::saveSettings()
     o->setProperty("virtualMidi", virtualMidiOn.load() ? 1 : 0);
     o->setProperty("strumSustain", strumSustain.load() ? 1 : 0);
     o->setProperty("strumRoll", strumRollMs.load());
+    {
+        const juce::ScopedLock sl(midiOutLock);
+        o->setProperty("midiOut", midiOutId);
+        o->setProperty("midiOutName", midiOutName);
+    }
     o->setProperty("controllers", controllersVar);
 
     auto f = settingsFile();
@@ -312,6 +328,53 @@ void GuitarService::sendMsg(const juce::MidiMessage& m)
     // "GH MIDI" virtual source: lets the DAW record the performance as notes
     if (virtualMidiOn.load() && virtualOut != nullptr)
         virtualOut->sendMessageNow(msg);
+    // user-picked port (Windows: loopMIDI or a real synth)
+    if (portOut != nullptr)
+        portOut->sendMessageNow(msg);
+}
+
+// ---------- picked MIDI output port ----------
+void GuitarService::selectMidiOutput(const juce::String& identifier, const juce::String& name)
+{
+    {
+        const juce::ScopedLock sl(midiOutLock);
+        midiOutId = identifier;
+        midiOutName = name;
+    }
+    midiOutRequest = true;
+    saveRequest = true;
+    notify();
+}
+
+// guitar thread only. Finds the saved port by identifier first, then by name
+// (identifiers can shift when devices are re-plugged on Windows).
+void GuitarService::openMidiOutput()
+{
+    juce::String id, name;
+    {
+        const juce::ScopedLock sl(midiOutLock);
+        id = midiOutId;
+        name = midiOutName;
+    }
+    if (portOut != nullptr)
+        allOff();   // don't leave notes hanging on the old port
+    portOut.reset();
+    if (id.isEmpty() && name.isEmpty())
+        return;
+    const auto outs = juce::MidiOutput::getAvailableDevices();
+    for (const auto& d : outs)
+        if (d.identifier == id)
+        {
+            portOut = juce::MidiOutput::openDevice(d.identifier);
+            break;
+        }
+    if (portOut == nullptr && name.isNotEmpty())
+        for (const auto& d : outs)
+            if (d.name == name)
+            {
+                portOut = juce::MidiOutput::openDevice(d.identifier);
+                break;
+            }
 }
 
 void GuitarService::noteOn(int note, int vel)
@@ -392,7 +455,9 @@ void GuitarService::run()
     uint8_t buf[64];
     int shorts = 0, polls = 0;
     hid_init();
-    virtualOut = juce::MidiOutput::createNewDevice("GH MIDI");
+    if constexpr (kHasVirtualMidi)
+        virtualOut = juce::MidiOutput::createNewDevice("GH MIDI");
+    openMidiOutput();
 
     while (! threadShouldExit())
     {
@@ -406,6 +471,8 @@ void GuitarService::run()
         if (const int d = strumNudge.exchange(0); d != 0)
             setStrum(juce::jlimit(0, kStrumMaxMs, strumRollMs.load() + d * kStrumStepMs));
 
+        if (midiOutRequest.exchange(false))
+            openMidiOutput();
         if (saveRequest.exchange(false))
             saveSettings();
         if (scanRequest.exchange(false))
@@ -512,6 +579,7 @@ void GuitarService::run()
     }
     allOff();
     virtualOut.reset();
+    portOut.reset();
     if (dev != nullptr)
     {
         hid_close(dev);

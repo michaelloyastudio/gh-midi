@@ -2,10 +2,10 @@
 
 Turn a Guitar Hero controller into a real MIDI instrument.
 
-A VST3 plugin and standalone app (macOS, Apple Silicon + Intel) that reads a
-Guitar Hero controller over USB HID and plays it like an instrument — inside
-your DAW, or as a MIDI controller for anything — with a real-time 3D note
-highway rendered in OpenGL.
+A VST3 plugin and standalone app (macOS Apple Silicon + Intel, and Windows
+x64) that reads a Guitar Hero controller over USB HID and plays it like an
+instrument — inside your DAW, or as a MIDI controller for anything — with a
+real-time 3D note highway rendered in OpenGL.
 
 **Full guide:** https://michaelloya.studio/gh-midi
 
@@ -29,18 +29,29 @@ through strum speeds, the joystick changes key (left/right) and octave
 controllers without a joystick. Any HID controller can be mapped
 from the in-plugin settings (per-control LEARN, live input testing).
 
-**No DAW required.** The release also ships a standalone macOS app: while it
-runs, every DAW and synth app on the Mac sees a MIDI input called "GH MIDI"
-(Logic, GarageBand, Ableton, FL, Reaper, ...). Run either the app or the
-plugin, not both — only one process can hold the guitar.
+**No DAW required.** The release also ships a standalone app: while it runs
+on a Mac, every DAW and synth app sees a MIDI input called "GH MIDI" (Logic,
+GarageBand, Ableton, FL, Reaper, ...). Windows has no virtual MIDI ports, so
+there the app's SETTINGS panel has a MIDI OUT picker instead: a
+[loopMIDI](https://www.tobias-erichsen.de/software/loopmidi.html) port to
+reach a DAW, or any real port (the Microsoft GS Wavetable Synth works as an
+instant test). Run either the app or the plugin, not both — only one process
+can hold the guitar.
 
-The plugin also publishes a virtual MIDI source ("GH MIDI") so DAWs record
-your performance as editable notes.
+On macOS the plugin also publishes the virtual "GH MIDI" source so DAWs
+record your performance as editable notes.
+
+**Windows is a beta.** The Windows zip is built on GitHub's Windows runners
+(there is no Windows machine in this project) and has not been played on real
+Windows hardware yet. Xbox 360 guitars (XInput) are not supported; Wii guitars
+through a USB adapter and PlayStation guitars enumerate as HID and should
+work. Please report what you find.
 
 ## Building
 
-Requirements: macOS, CMake ≥ 3.24, Xcode command line tools. JUCE 8 and
-hidapi are fetched automatically.
+JUCE 8 and hidapi are fetched automatically by CMake (≥ 3.24).
+
+**macOS** (Xcode command line tools):
 
 ```
 cd plugin
@@ -52,13 +63,26 @@ The VST3 installs to `~/Library/Audio/Plug-Ins/VST3` after a successful
 build. A Standalone app is also built; run it with `GHMIDI_DEMO=1` for a
 self-playing demo (no controller needed).
 
+**Windows** (Visual Studio 2022 with the Desktop C++ workload):
+
+```
+cmake -S plugin -B plugin/build -G "Visual Studio 17 2022" -A x64
+cmake --build plugin/build --config Release
+```
+
+Outputs land in `plugin/build/GHMidi_artefacts/Release/`: the `VST3/GH
+MIDI.vst3` folder and `Standalone/GH MIDI.exe`. Every push to `main` also
+builds this on GitHub Actions (`.github/workflows/windows.yml`); the zip is
+the workflow's artifact, and running the workflow by hand with a release tag
+attaches it to that release.
+
 ## Porting
 
-The engine (`plugin/src/PluginProcessor.cpp`) is plain JUCE + hidapi and
-should port to Windows/Linux with modest effort. Known Windows notes: the
-virtual MIDI source needs a helper like loopMIDI (Windows has no built-in
-virtual MIDI ports), and XInput-only controllers (Xbox 360 era) would need
-an additional input backend beyond hidapi. PRs welcome.
+The engine (`plugin/src/PluginProcessor.cpp`) is plain JUCE + hidapi; the
+only platform seams are the virtual MIDI source (macOS/Linux) versus the
+MIDI OUT picker (Windows) and the settings path. Linux should need little
+beyond a build. Still open: an XInput backend for Xbox 360-era guitars,
+which don't speak HID. PRs welcome.
 
 `tools/` scripts from the prototyping era (Python HID dump / mapper /
 MIDI bridge) are kept for adapter debugging.
