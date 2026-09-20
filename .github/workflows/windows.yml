@@ -4,9 +4,10 @@ name: Windows build
 # VST3 + standalone. Every push to main uploads the release folder as a
 # workflow artifact, then a second job smoke-tests the exe in the app's own
 # demo mode under software OpenGL, collecting a log and a crash dump if it
-# dies. A manual run given a release tag also attaches the zip to that
-# GitHub release; one given an earlier run id skips the build and only
-# smoke-tests that run's artifact.
+# dies. A v* tag, or a manual run given a release tag, zips the folder and
+# attaches it to that GitHub release once the smoke test has passed; a manual
+# run given an earlier run id skips the build and only smoke-tests that run's
+# artifact.
 
 on:
   push:
@@ -63,9 +64,7 @@ jobs:
           Copy-Item "plugin\build\GHMidi_artefacts\Release\Standalone\GH MIDI.exe" $stage
           Copy-Item release\README-Windows.txt "$stage\README.txt"
           Get-ChildItem -Recurse $stage | Select-Object FullName, Length
-          7z a -tzip "release\$name.zip" "$stage\*"
           "name=$name" >> $env:GITHUB_OUTPUT
-          "zip=release\$name.zip" >> $env:GITHUB_OUTPUT
 
       - uses: actions/upload-artifact@v4
         with:
@@ -79,16 +78,6 @@ jobs:
           name: windows-pdb
           path: plugin/build/GHMidi_artefacts/Release/Standalone/GH MIDI.pdb
           if-no-files-found: warn
-
-      - name: Attach to GitHub release
-        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $tag = '${{ inputs.release_tag }}'
-          if ($tag -eq '') { $tag = '${{ github.ref_name }}' }
-          gh release upload $tag "${{ steps.stage.outputs.zip }}" --clobber
 
   smoke:
     needs: build
@@ -122,9 +111,12 @@ jobs:
           Copy-Item (Get-ChildItem dl -Recurse -Filter 'GH MIDI.exe' | Select-Object -First 1).FullName $t
           if (Test-Path dl\pdb\*.pdb) { Copy-Item dl\pdb\*.pdb $t }
 
-          # no GPU on the runner: Mesa's llvmpipe opengl32.dll next to the exe
+          # no GPU on the runner: Mesa's llvmpipe next to the exe. ONLY the desktop
+          # OpenGL pair (loader + gallium megadriver): the archive also carries a
+          # d3d10warp.dll, and copying that beside the exe shadows the system WARP
+          # that Direct2D needs on a GPU-less machine -> fast-fail on first ShowWindow.
           gh release download -R pal1000/mesa-dist-win --pattern '*release-msvc.7z' -O mesa.7z
-          7z x mesa.7z -omesa 'x64\*' | Select-String -Pattern 'Everything is Ok|ERROR'
+          7z x mesa.7z -omesa 'x64\opengl32.dll' 'x64\libgallium_wgl.dll' 'x64\libglapi.dll' | Select-String -Pattern 'Everything is Ok|ERROR'
           Copy-Item mesa\x64\*.dll $t
           "deployed next to the exe:"
           Get-ChildItem $t | ForEach-Object { "  $($_.Name)  $($_.Length)" }
@@ -175,3 +167,23 @@ jobs:
             smoke/*.txt
             smoke/*.dmp
           if-no-files-found: warn
+
+  # zip + attach only after the smoke test passed
+  release:
+    needs: [build, smoke]
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
+    runs-on: windows-2022
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Zip and attach
+        shell: pwsh
+        run: |
+          gh run download ${{ github.run_id }} -R ${{ github.repository }} --pattern 'GH-MIDI-*-Windows' -D dl
+          $folder = Get-ChildItem dl -Directory | Select-Object -First 1
+          $zip = "$($folder.Name).zip"
+          7z a -tzip $zip "$($folder.FullName)\*"
+          7z l $zip
+          $tag = '${{ inputs.release_tag }}'
+          if ($tag -eq '') { $tag = '${{ github.ref_name }}' }
+          gh release upload $tag $zip --clobber
