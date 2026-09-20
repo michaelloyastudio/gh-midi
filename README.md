@@ -63,10 +63,10 @@ The VST3 installs to `~/Library/Audio/Plug-Ins/VST3` after a successful
 build. A Standalone app is also built; run it with `GHMIDI_DEMO=1` for a
 self-playing demo (no controller needed).
 
-**Windows** (Visual Studio 2022 with the Desktop C++ workload):
+**Windows** (Visual Studio 2022 or newer with the Desktop C++ workload):
 
 ```
-cmake -S plugin -B plugin/build -G "Visual Studio 17 2022" -A x64
+cmake -S plugin -B plugin/build -A x64
 cmake --build plugin/build --config Release
 ```
 

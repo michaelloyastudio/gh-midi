@@ -29,12 +29,14 @@ concurrency:
 
 jobs:
   build:
-    runs-on: windows-latest
+    # windows-latest became the windows-2025-vs2026 image in Sep 2026 (Visual
+    # Studio 2026 only). JUCE 8.0.4 is proven on VS 2022, so pin that image.
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
 
       - name: Configure
-        run: cmake -S plugin -B plugin/build -G "Visual Studio 17 2022" -A x64
+        run: cmake -S plugin -B plugin/build -A x64   # newest Visual Studio CMake finds
 
       - name: Build
         run: cmake --build plugin/build --config Release --parallel
