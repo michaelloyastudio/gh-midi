@@ -455,8 +455,12 @@ void GuitarService::run()
     uint8_t buf[64];
     int shorts = 0, polls = 0;
     hid_init();
-    if constexpr (kHasVirtualMidi)
-        virtualOut = juce::MidiOutput::createNewDevice("GH MIDI");
+#if JUCE_MAC || JUCE_LINUX || JUCE_IOS
+    // createNewDevice only exists on these platforms (Windows has no virtual
+    // MIDI ports); a preprocessor guard, because even a discarded
+    // `if constexpr` branch has to name-resolve.
+    virtualOut = juce::MidiOutput::createNewDevice("GH MIDI");
+#endif
     openMidiOutput();
 
     while (! threadShouldExit())

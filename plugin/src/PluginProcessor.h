@@ -78,10 +78,10 @@ public:
     // macOS/Linux publish a virtual "GH MIDI" source. Windows has no virtual
     // MIDI ports, so there the settings panel offers a picker instead: a
     // loopMIDI port to reach a DAW, or any real synth/port.
-#if JUCE_WINDOWS
-    static constexpr bool kHasVirtualMidi = false;
-#else
+#if JUCE_MAC || JUCE_LINUX || JUCE_IOS   // where JUCE declares MidiOutput::createNewDevice
     static constexpr bool kHasVirtualMidi = true;
+#else
+    static constexpr bool kHasVirtualMidi = false;
 #endif
     void selectMidiOutput(const juce::String& identifier, const juce::String& name);  // both empty = none
     juce::String currentMidiOutputId() const

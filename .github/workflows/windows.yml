@@ -90,6 +90,7 @@ jobs:
           gh release download -R pal1000/mesa-dist-win --pattern '*release-msvc.7z' -O mesa.7z
           7z x mesa.7z -omesa 'x64\*' | Out-Null
           Copy-Item mesa\x64\*.dll $t
+          $env:GALLIUM_DRIVER = 'llvmpipe'   # skip Mesa's D3D12 path on the GPU-less runner
           $env:GHMIDI_DEMO = '1'
           $env:GHMIDI_HUDSNAP = $t
           $env:GHMIDI_SNAPSHOT = $t
