@@ -698,7 +698,7 @@ void GHMidiEditor::resized()
     highway.setViewSize(getWidth(), getHeight());
     gearBtn.setBounds(getWidth() - 104, 16, 92, 28);
     // ? sits by the wordmark; FRETS and SETTINGS stay together top-right
-    helpBtn.setBounds(150, 17, 28, 26);
+    helpBtn.setBounds(100, 17, 28, 26);   // just past the end of the wordmark
     fretsBtn.setBounds(getWidth() - 104 - 6 - 58, 16, 58, 28);
 
     // FRETS editor
