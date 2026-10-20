@@ -3,14 +3,29 @@
 #include <cstdlib>
 #include <cstring>
 
+#if JUCE_WINDOWS
+// Windows sleeps in 15.6 ms ticks unless a process asks for 1 ms timers --
+// that alone made every poll of the guitar up to 15 ms late. winmm, declared
+// here so this file doesn't pull in <windows.h>.
+extern "C" __declspec(dllimport) unsigned int __stdcall timeBeginPeriod(unsigned int);
+extern "C" __declspec(dllimport) unsigned int __stdcall timeEndPeriod(unsigned int);
+#pragma comment(lib, "winmm.lib")
+#endif
+
 namespace {
-// easy mode: I, V, vi, IV, ii  (degree offset, isMinor)
-constexpr int kDegree[5] = { 0, 7, 9, 5, 2 };
-constexpr bool kMinor[5] = { false, false, true, false, true };
+int floorDiv(int a, int b) { return a >= 0 ? a / b : -((-a + b - 1) / b); }
 // penta mode: fret -> major pentatonic degree of the key
 constexpr int kPentaDeg[5] = { 0, 2, 4, 7, 9 };
 constexpr int kChordRootBase = 48, kBassBase = 36, kRealBase = 40;
 constexpr int kVelDown = 100, kVelUp = 78;
+// strum edges wait this long so a fret that lands a hair late still joins
+// the chord (and a one-report contact glitch is filtered out). Was 10 ms.
+constexpr double kStrumLatchS = 0.004;
+// palm mute: notes are choked this long after the strum, played softer, and
+// chords drop to a low power-chord voicing -- the chug
+constexpr double kPalmS = 0.11;
+constexpr float kPalmVel = 0.72f;
+constexpr float kPalmWhammy = 0.22f;   // whammy pressed past this = palm on
 // CHART mode: Clone Hero / Rock Band PART GUITAR lanes, green..orange = base..base+4,
 // one base per difficulty (Easy, Medium, Hard, Expert). Every difficulty is written at once.
 constexpr int kChartLanes[4] = { 60, 72, 84, 96 };
@@ -22,40 +37,44 @@ const char* noteNames[12] = { "C","C#","D","D#","E","F","F#","G","G#","A","A#","
 
 juce::String noteName(int n)
 {
-    return juce::String(noteNames[n % 12]) + juce::String(n / 12 - 1);
+    return juce::String(noteNames[((n % 12) + 12) % 12]) + juce::String(floorDiv(n, 12) - 1);
 }
 
-struct ChordDef { int rootOff; int third; int seventh; const char* suffix; };
+// chord qualities: intervals above the root. third < 0 = power chord (no
+// third); top = the highest chord tone (0 = the octave)
+struct Quality { const char* suffix; int third; int fifth; int top; };
+constexpr Quality kQualities[] = {
+    { "",     4, 7, 0 },  { "m",    3, 7, 0 },  { "7",    4, 7, 10 }, { "maj7", 4, 7, 11 },
+    { "m7",   3, 7, 10 }, { "dim",  3, 6, 0 },  { "m7b5", 3, 6, 10 }, { "sus2", 2, 7, 0 },
+    { "sus4", 5, 7, 0 },  { "5",   -1, 7, 0 },  { "aug",  4, 8, 0 },  { "6",    4, 7, 9 },
+};
+constexpr int kNumQualities = (int) (sizeof(kQualities) / sizeof(kQualities[0]));
+enum { QMaj = 0, QMin = 1, Q7 = 2, QMaj7 = 3, QMin7 = 4 };
 
-bool chordForMask(int mask, ChordDef& out)
-{
-    switch (mask)
-    {
-        case 0x01: out = { 0, 4, 0, "" };        return true;  // I
-        case 0x02: out = { 7, 4, 0, "" };        return true;  // V
-        case 0x04: out = { 9, 3, 0, "m" };       return true;  // vi
-        case 0x08: out = { 5, 4, 0, "" };        return true;  // IV
-        case 0x10: out = { 2, 3, 0, "m" };       return true;  // ii
-        // neighbours = sevenths of the lower fret's chord
-        case 0x03: out = { 0, 4, 11, "maj7" };   return true;  // Imaj7
-        case 0x06: out = { 7, 4, 10, "7" };      return true;  // V7
-        case 0x0C: out = { 9, 3, 10, "m7" };     return true;  // vi m7
-        case 0x18: out = { 5, 4, 11, "maj7" };   return true;  // IVmaj7
-        // stretches = the chords the five frets can't make
-        case 0x05: out = { 4, 3, 0, "m" };       return true;  // iii
-        case 0x14: out = { 4, 4, 0, "" };        return true;  // III (V/vi)
-        case 0x0A: out = { 10, 4, 0, "" };       return true;  // bVII
-        case 0x09: out = { 5, 3, 0, "m" };       return true;  // iv
-        case 0x12: out = { 8, 4, 0, "" };        return true;  // bVI
-        default: return false;
-    }
-}
+// CHORDS shapes: the five single frets, then every two-fret pair
+//   neighbours = sevenths of the lower fret's chord,
+//   stretches  = the chords the five frets can't make
+struct ChordSlotDef { int mask; int root; int quality; };
+constexpr ChordSlotDef kChordDefaults[GuitarService::kChordSlots] = {
+    { 0x01, 0, QMaj },   // I
+    { 0x02, 7, QMaj },   // V
+    { 0x04, 9, QMin },   // vi
+    { 0x08, 5, QMaj },   // IV
+    { 0x10, 2, QMin },   // ii
+    { 0x03, 0, QMaj7 },  // Imaj7
+    { 0x06, 7, Q7 },     // V7
+    { 0x0C, 9, QMin7 },  // vi m7
+    { 0x18, 5, QMaj7 },  // IVmaj7
+    { 0x05, 4, QMin },   // iii
+    { 0x14, 4, QMaj },   // III (V/vi)
+    { 0x0A, 10, QMaj },  // bVII
+    { 0x09, 5, QMin },   // iv
+    { 0x12, 8, QMaj },   // bVI
+    { 0x11, 2, QMin },   // G+O: same as orange until someone maps it
+};
+constexpr int kSoloDefaults[GuitarService::kSoloSlots] = { 0, 2, 4, 7, 9, -12 };
 
-int pentaNote(int key, int octave, int fret)
-{
-    const int root = 48 + key + octave;
-    return fret < 0 ? root - 12 : root + kPentaDeg[fret];
-}
+int pentaAt(int i) { return 12 * floorDiv(i, 5) + kPentaDeg[i - 5 * floorDiv(i, 5)]; }
 
 GuitarService::ControllerMap defaultWusbMap()
 {
@@ -75,12 +94,104 @@ GuitarService::ControllerMap defaultWusbMap()
 
 // ============================== GuitarService ==============================
 
+// ---------- fret editor tables ----------
+int GuitarService::chordSlotMask(int slot)        { return kChordDefaults[juce::jlimit(0, kChordSlots - 1, slot)].mask; }
+int GuitarService::defaultChordRoot(int slot)     { return kChordDefaults[juce::jlimit(0, kChordSlots - 1, slot)].root; }
+int GuitarService::defaultChordQuality(int slot)  { return kChordDefaults[juce::jlimit(0, kChordSlots - 1, slot)].quality; }
+int GuitarService::defaultSoloOffset(int slot)    { return kSoloDefaults[juce::jlimit(0, kSoloSlots - 1, slot)]; }
+int GuitarService::numQualities()                 { return kNumQualities; }
+juce::String GuitarService::qualitySuffix(int q)  { return kQualities[juce::jlimit(0, kNumQualities - 1, q)].suffix; }
+juce::String GuitarService::noteName(int n)       { return ::noteName(n); }
+
+juce::String GuitarService::chordName(int key, int root, int quality)
+{
+    return juce::String(noteNames[((key + root) % 12 + 12) % 12]) + qualitySuffix(quality);
+}
+
+// SOLO range: slide a note `steps` places along the key's major pentatonic
+// (5 steps = an octave). The other in-key notes (4th, 7th) slide along the
+// major scale by the same distance so they stay in key; out-of-key notes keep
+// their distance above the pentatonic note below them.
+int GuitarService::soloShift(int offset, int steps)
+{
+    if (steps == 0)
+        return offset;
+    const int pc = ((offset % 12) + 12) % 12;
+    if (pc == 5 || pc == 11)
+    {
+        static const int kMajor[7] = { 0, 2, 4, 5, 7, 9, 11 };
+        auto majAt = [](int j) { return 12 * floorDiv(j, 7) + kMajor[j - 7 * floorDiv(j, 7)]; };
+        const int j = 7 * floorDiv(offset, 12) + (pc == 5 ? 3 : 6);
+        const int dj = steps >= 0 ? (steps * 7 + 2) / 5 : -((-steps * 7 + 2) / 5);
+        return majAt(j + dj);
+    }
+    int i = 5 * floorDiv(offset, 12);
+    while (pentaAt(i + 1) <= offset) ++i;
+    while (pentaAt(i) > offset) --i;
+    return pentaAt(i + steps) + (offset - pentaAt(i));
+}
+
+int GuitarService::soloNoteWith(int slot, int off) const
+{
+    const int k = uiKey.load(), st = uiSoloStep.load();
+    // the open note is the low anchor: it only moves by whole octaves
+    const int n = slot == kSoloOpen ? 48 + k + off + 12 * floorDiv(st, 5)
+                                    : 48 + k + soloShift(off, st);
+    return juce::jlimit(0, 127, n);
+}
+
+void GuitarService::setChordSlot(int slot, int root, int quality)
+{
+    if (slot < 0 || slot >= kChordSlots) return;
+    chordRootA[slot] = ((root % 12) + 12) % 12;
+    chordQualA[slot] = juce::jlimit(0, kNumQualities - 1, quality);
+    saveRequest = true;
+    notify();
+}
+
+void GuitarService::setSoloSlot(int slot, int offset)
+{
+    if (slot < 0 || slot >= kSoloSlots) return;
+    soloOffA[slot] = juce::jlimit(-24, 36, offset);
+    saveRequest = true;
+    notify();
+}
+
+void GuitarService::resetChordSlots()
+{
+    for (int i = 0; i < kChordSlots; ++i)
+    {
+        chordRootA[i] = kChordDefaults[i].root;
+        chordQualA[i] = kChordDefaults[i].quality;
+    }
+    saveRequest = true;
+    notify();
+}
+
+void GuitarService::resetSoloSlots()
+{
+    for (int i = 0; i < kSoloSlots; ++i)
+        soloOffA[i] = kSoloDefaults[i];
+    saveRequest = true;
+    notify();
+}
+
 GuitarService::GuitarService() : juce::Thread("gh-guitar-poll")
 {
+    for (int i = 0; i < kChordSlots; ++i)
+    {
+        chordRootA[i] = kChordDefaults[i].root;
+        chordQualA[i] = kChordDefaults[i].quality;
+    }
+    for (int i = 0; i < kSoloSlots; ++i)
+        soloOffA[i] = kSoloDefaults[i];
+    saveRequest = false;
     map = defaultWusbMap();
     loadSettings();
 
     demoMode = std::getenv("GHMIDI_DEMO") != nullptr
+               && juce::JUCEApplicationBase::isStandaloneApp();
+    selfTest = std::getenv("GHMIDI_SELFTEST") != nullptr
                && juce::JUCEApplicationBase::isStandaloneApp();
     if (demoMode)
     {
@@ -104,7 +215,7 @@ GuitarService::GuitarService() : juce::Thread("gh-guitar-poll")
 
     const auto exe = juce::File::getSpecialLocation(juce::File::currentExecutableFile)
                          .getFileNameWithoutExtension();
-    if (demoMode
+    if (demoMode || selfTest
         || (! exe.containsIgnoreCase("juce_vst3_helper") && ! exe.containsIgnoreCase("auval")))
         startThread();
 }
@@ -142,7 +253,7 @@ static void varToMap(const juce::var& v, GuitarService::ControllerMap& m)
     btn("fretG", m.frets[0]); btn("fretR", m.frets[1]); btn("fretY", m.frets[2]);
     btn("fretB", m.frets[3]); btn("fretO", m.frets[4]);
     btn("strumDown", m.strumDown); btn("strumUp", m.strumUp);
-    btn("plus", m.plusBtn); btn("minus", m.minusBtn);
+    btn("plus", m.plusBtn); btn("minus", m.minusBtn); btn("palm", m.palmBtn);
     if (auto* a = v["whammy"].getArray(); a != nullptr && a->size() >= 3)
         m.whammy = { (int) (*a)[0], (int) (*a)[1], (int) (*a)[2] };
     auto stick = [&](const char* k, GuitarService::StickMap& sm)
@@ -164,7 +275,7 @@ static juce::var mapToVar(const GuitarService::ControllerMap& m)
     btn("fretG", m.frets[0]); btn("fretR", m.frets[1]); btn("fretY", m.frets[2]);
     btn("fretB", m.frets[3]); btn("fretO", m.frets[4]);
     btn("strumDown", m.strumDown); btn("strumUp", m.strumUp);
-    btn("plus", m.plusBtn); btn("minus", m.minusBtn);
+    btn("plus", m.plusBtn); btn("minus", m.minusBtn); btn("palm", m.palmBtn);
     o->setProperty("whammy", juce::Array<juce::var> { m.whammy.byteIdx, m.whammy.rest, m.whammy.extreme });
     o->setProperty("stickX", juce::Array<juce::var> { m.stickX.byteIdx, m.stickX.center, m.stickX.lo, m.stickX.hi });
     o->setProperty("stickY", juce::Array<juce::var> { m.stickY.byteIdx, m.stickY.center, m.stickY.lo, m.stickY.hi });
@@ -210,6 +321,18 @@ void GuitarService::loadSettings()
         virtualMidiOn = get("virtualMidi", 1) != 0;
         strumSustain = get("strumSustain", 0) != 0;
         strumRollMs = juce::jlimit(0, 50, get("strumRoll", 10));
+        lefty = get("lefty", 0) != 0;
+        palmWhammy = get("palmWhammy", 0) != 0;
+        if (auto* a = v["chords"].getArray(); a != nullptr && a->size() == kChordSlots)
+            for (int i = 0; i < kChordSlots; ++i)
+                if (auto* e = (*a)[i].getArray(); e != nullptr && e->size() >= 2)
+                {
+                    chordRootA[i] = (((int) (*e)[0]) % 12 + 12) % 12;
+                    chordQualA[i] = juce::jlimit(0, kNumQualities - 1, (int) (*e)[1]);
+                }
+        if (auto* a = v["solo"].getArray(); a != nullptr && a->size() == kSoloSlots)
+            for (int i = 0; i < kSoloSlots; ++i)
+                soloOffA[i] = juce::jlimit(-24, 36, (int) (*a)[i]);
         {
             const juce::ScopedLock sl(midiOutLock);
             midiOutId = v["midiOut"].toString();
@@ -248,6 +371,17 @@ void GuitarService::saveSettings()
     o->setProperty("virtualMidi", virtualMidiOn.load() ? 1 : 0);
     o->setProperty("strumSustain", strumSustain.load() ? 1 : 0);
     o->setProperty("strumRoll", strumRollMs.load());
+    o->setProperty("lefty", lefty.load() ? 1 : 0);
+    o->setProperty("palmWhammy", palmWhammy.load() ? 1 : 0);
+    {
+        juce::Array<juce::var> ch, so;
+        for (int i = 0; i < kChordSlots; ++i)
+            ch.add(juce::Array<juce::var> { chordRootA[i].load(), chordQualA[i].load() });
+        for (int i = 0; i < kSoloSlots; ++i)
+            so.add(soloOffA[i].load());
+        o->setProperty("chords", ch);
+        o->setProperty("solo", so);
+    }
     {
         const juce::ScopedLock sl(midiOutLock);
         o->setProperty("midiOut", midiOutId);
@@ -327,14 +461,101 @@ void GuitarService::demoRun()
     }
 }
 
+// ---------- self-test (dev only): drive step() with synthetic WUSBMote reports ----------
+void GuitarService::selfTestRun()
+{
+    map = defaultWusbMap();
+    key = 0; uiKey = 0;
+    strumRollMs = 10;
+    strumSustain = false;
+    lefty = false;
+    palmWhammy = false;
+    virtualMidiOn = false;
+    for (int i = 0; i < kChordSlots; ++i) { chordRootA[i] = kChordDefaults[i].root; chordQualA[i] = kChordDefaults[i].quality; }
+    for (int i = 0; i < kSoloSlots; ++i) soloOffA[i] = kSoloDefaults[i];
+    uint8_t r[16] {};
+    auto setIdle = [&] { std::memset(r, 0, sizeof(r)); r[12] = 220; r[2] = 62; r[4] = 62; };
+    auto run = [&](double secs)
+    {
+        const double end = juce::Time::getMillisecondCounterHiRes() * 0.001 + secs;
+        while (juce::Time::getMillisecondCounterHiRes() * 0.001 < end)
+        {
+            step(r, 16);
+            juce::Thread::sleep(1);
+        }
+    };
+    auto scene = [&](const juce::String& name)
+    {
+        setIdle();
+        run(0.05);
+        selfTestLog << "\n== " << name << " ==\n";
+        selfTestT0 = juce::Time::getMillisecondCounterHiRes() * 0.001;
+    };
+    auto strumDown = [&](double hold) { r[13] |= 0x20; selfTestLog << "  (strum down at " << juce::String((juce::Time::getMillisecondCounterHiRes() * 0.001 - selfTestT0) * 1000.0, 1) << " ms)\n"; run(hold); r[13] &= (uint8_t) ~0x20; };
+
+    scene("CHORDS green, down strum, 10 ms roll");
+    r[13] = 0x01; run(0.02); strumDown(0.05); run(0.15); r[13] = 0; run(0.05);
+
+    scene("CHORDS orange remapped to Em");
+    setChordSlot(4, 4, 1);
+    r[13] = 0x10; run(0.02); strumDown(0.05); run(0.1); r[13] = 0; run(0.05);
+
+    scene("CHORDS G+O shape (slot 14) remapped to D7");
+    setChordSlot(14, 2, 2);
+    r[13] = 0x11; run(0.02); strumDown(0.05); run(0.1); r[13] = 0; run(0.05);
+
+    scene("CHORDS 3-fret shape G+R+Y falls back to yellow");
+    r[13] = 0x07; run(0.02); strumDown(0.05); run(0.1); r[13] = 0; run(0.05);
+
+    scene("PALM MUTE via whammy: red held 400 ms, expect choke ~130 ms");
+    palmWhammy = true;
+    r[12] = 0; r[13] = 0x02; run(0.03); strumDown(0.05); run(0.35); r[13] = 0; r[12] = 220; run(0.05);
+    palmWhammy = false;
+
+    scene("roll 0 ms: all chord notes at once");
+    strumRollMs = 0;
+    r[13] = 0x08; run(0.02); strumDown(0.05); run(0.05); r[13] = 0; run(0.05);
+    strumRollMs = 10;
+
+    scene("LEFTY: physical down strum = up strum (vel 78, high->low)");
+    lefty = true;
+    r[13] = 0x01; run(0.02); strumDown(0.05); run(0.1); r[13] = 0; run(0.05);
+    lefty = false;
+
+    scene("SOLO: minus x2, range +1 step, green+yellow down strum");
+    r[13] = 0x80; run(0.03); r[13] = 0; run(0.03); r[13] = 0x80; run(0.03); r[13] = 0; run(0.03);
+    shiftOctave(1);
+    selfTestLog << "  mode " << mode << " soloStep " << soloStep << " green " << noteName(soloNote(0)) << "\n";
+    r[13] = 0x05; run(0.02); strumDown(0.05); run(0.05);
+    r[13] = 0x04; run(0.05);   // lift green: only its note stops
+    r[13] = 0; run(0.05);
+
+    scene("SOLO: range walk, green fret note at each step");
+    for (int st = -3; st <= 6; ++st)
+    {
+        soloStep = st; uiSoloStep = st;
+        selfTestLog << "  step " << st << ": ";
+        for (int i = 0; i < 6; ++i) selfTestLog << noteName(soloNote(i)) << " ";
+        selfTestLog << "\n";
+    }
+    setSoloSlot(4, 5);   // orange -> the 4th (F in C)
+    selfTestLog << "  orange=4th: ";
+    for (int st = 0; st <= 5; ++st) { soloStep = st; uiSoloStep = st; selfTestLog << noteName(soloNote(4)) << " "; }
+    selfTestLog << "\n";
+
+    if (auto* path = std::getenv("GHMIDI_SELFTEST"))
+        juce::File(juce::String(path)).replaceWithText(selfTestLog);
+    juce::MessageManager::callAsync([] { juce::JUCEApplicationBase::quit(); });
+}
+
 // ---------- MIDI plumbing ----------
-void GuitarService::addClient(juce::MidiMessageCollector* c)
+void GuitarService::addClient(MidiInbox* c)
 {
     const juce::ScopedLock sl(clientLock);
     clients.addIfNotAlreadyThere(c);
 }
 
-void GuitarService::removeClient(juce::MidiMessageCollector* c)
+void GuitarService::removeClient(MidiInbox* c)
 {
     const juce::ScopedLock sl(clientLock);
     clients.removeAllInstancesOf(c);
@@ -344,10 +565,13 @@ void GuitarService::sendMsg(const juce::MidiMessage& m)
 {
     auto msg = m;
     msg.setTimeStamp(juce::Time::getMillisecondCounterHiRes() * 0.001);
+    if (selfTest)
+        selfTestLog << juce::String((msg.getTimeStamp() - selfTestT0) * 1000.0, 1) << " ms  "
+                    << msg.getDescription() << "\n";
     {
         const juce::ScopedLock sl(clientLock);
         for (auto* c : clients)
-            c->addMessageToQueue(msg);
+            c->push(msg);
     }
     // "GH MIDI" virtual source: lets the DAW record the performance as notes
     if (virtualMidiOn.load() && virtualOut != nullptr)
@@ -409,8 +633,47 @@ void GuitarService::noteOn(int note, int vel)
     ringing.add(note);
 }
 
+void GuitarService::scheduleOn(int note, int vel, double due)
+{
+    if (note < 0 || note > 127)
+        return;
+    pending.add({ due, note, vel });
+}
+
+void GuitarService::releaseNote(int note)
+{
+    for (int i = pending.size(); --i >= 0;)
+        if (pending.getReference(i).note == note)
+        {
+            pending.remove(i);
+            return;
+        }
+    if (ringing.contains(note))
+    {
+        sendMsg(juce::MidiMessage::noteOff(1, note));
+        ringing.removeValue(note);
+    }
+}
+
+void GuitarService::flushPending(double now)
+{
+    for (int i = 0; i < pending.size();)
+    {
+        const auto p = pending.getReference(i);
+        if (now >= p.due)
+        {
+            pending.remove(i);
+            noteOn(p.note, p.vel);
+        }
+        else
+            ++i;
+    }
+}
+
 void GuitarService::allOff()
 {
+    pending.clearQuick();
+    palmCutAt = -1.0;
     for (int n : ringing)
         sendMsg(juce::MidiMessage::noteOff(1, n));
     ringing.clear();
@@ -475,9 +738,17 @@ void GuitarService::run()
         demoRun();
         return;
     }
+    if (selfTest)
+    {
+        selfTestRun();
+        return;
+    }
 
     uint8_t buf[64];
     int shorts = 0, polls = 0;
+#if JUCE_WINDOWS
+    timeBeginPeriod(1);
+#endif
     hid_init();
 #if JUCE_MAC || JUCE_LINUX || JUCE_IOS
     // createNewDevice only exists on these platforms (Windows has no virtual
@@ -550,7 +821,7 @@ void GuitarService::run()
         int got = 0;
         if (ioMode == 3)
         {
-            const int r = hid_read_timeout(dev, buf, sizeof(buf), 4);
+            const int r = hid_read_timeout(dev, buf, sizeof(buf), 1);
             if (r < 0)
             {
                 hid_close(dev);
@@ -584,8 +855,8 @@ void GuitarService::run()
         if (got < 2)
         {
             ++shorts;
-            adapterEmpty = polls > 250 && shorts > polls - 50;
-            wait(4);
+            adapterEmpty = polls > 1000 && shorts > polls - 200;
+            wait(1);
             continue;
         }
         adapterEmpty = false;
@@ -603,7 +874,10 @@ void GuitarService::run()
             learnTick(buf, got, now);
         else
             step(buf, got);
-        wait(4);
+        // ~1 ms between polls (was 4): the guitar is read up to ~1000x a
+        // second. A stream device (ioMode 3) already blocked in hid_read.
+        if (ioMode != 3)
+            wait(1);
     }
     allOff();
     virtualOut.reset();
@@ -614,6 +888,9 @@ void GuitarService::run()
         dev = nullptr;
     }
     hid_exit();  // on this thread, while its run loop still exists
+#if JUCE_WINDOWS
+    timeEndPeriod(1);
+#endif
 }
 
 // ---------- per-control mapping ----------
@@ -621,7 +898,8 @@ juce::String GuitarService::targetName(int t)
 {
     static const char* names[] = { "GREEN FRET", "RED FRET", "YELLOW FRET", "BLUE FRET",
                                    "ORANGE FRET", "STRUM DOWN", "STRUM UP", "PLUS BUTTON",
-                                   "MINUS BUTTON", "WHAMMY", "JOYSTICK LEFT/RIGHT", "JOYSTICK UP/DOWN" };
+                                   "MINUS BUTTON", "WHAMMY", "JOYSTICK LEFT/RIGHT", "JOYSTICK UP/DOWN",
+                                   "PALM MUTE (HOLD)" };
     return t >= 0 && t < LTargetCount ? names[t] : juce::String();
 }
 
@@ -634,6 +912,7 @@ static GuitarService::ButtonMap* buttonSlot(GuitarService::ControllerMap& m, int
         case 6: return &m.strumUp;
         case 7: return &m.plusBtn;
         case 8: return &m.minusBtn;
+        case GuitarService::LPalm: return &m.palmBtn;
         default: return nullptr;
     }
 }
@@ -707,10 +986,11 @@ void GuitarService::learnTick(const uint8_t* d, int len, double now)
         for (auto& b : map.frets)
             if (b.byteIdx == i) return true;
         return map.strumDown.byteIdx == i || map.strumUp.byteIdx == i
-            || map.plusBtn.byteIdx == i || map.minusBtn.byteIdx == i;
+            || map.plusBtn.byteIdx == i || map.minusBtn.byteIdx == i
+            || map.palmBtn.byteIdx == i;
     };
 
-    if (t <= LMinus)  // buttons: first stable change binds
+    if (t <= LMinus || t == LPalm)  // buttons: first stable change binds
     {
         if (learnPhase == 1)
         {
@@ -823,12 +1103,18 @@ void GuitarService::shiftKey(int d)
 // every mode's highest/lowest note inside MIDI 0..127
 void GuitarService::shiftOctave(int d)
 {
-    if (mode != Easy)
+    if (mode == Penta)
+    {
+        // SOLO: the frets slide one scale note at a time (5 steps = an octave)
+        soloStep = juce::jlimit(kSoloStepMin, kSoloStepMax, soloStep + d);
+        uiSoloStep = soloStep;
+        announce("green " + noteName(soloNote(0)));
+    }
+    else if (mode != Easy)
     {
         octaveReal = juce::jlimit(kOctaveMin, kOctaveMax, octaveReal + d * 12);
         uiOctave = octaveReal;
-        announce(mode == Real ? "base " + noteName(kRealBase + key + octaveReal)
-                              : "root " + noteName(48 + key + octaveReal));
+        announce("base " + noteName(kRealBase + key + octaveReal));
     }
     else
     {
@@ -856,6 +1142,14 @@ void GuitarService::step(const uint8_t* d, int len)
         m = map;
     }
 
+    // rolled chord notes that are due, then a palm-muted strum's choke
+    flushPending(now);
+    if (palmCutAt >= 0.0 && now >= palmCutAt)
+    {
+        allOff();
+        ringFret = ringCombo = -1;
+    }
+
     auto pressed = [&](const ButtonMap& b)
     {
         return b.valid() && b.byteIdx < len && (d[b.byteIdx] & b.mask) != 0;
@@ -865,11 +1159,13 @@ void GuitarService::step(const uint8_t* d, int len)
     for (int i = 0; i < 5; ++i)
         if (pressed(m.frets[i]))
             combo |= 1 << i;
-    const bool down = pressed(m.strumDown);
-    const bool up = pressed(m.strumUp);
+    bool down = pressed(m.strumDown);
+    bool up = pressed(m.strumUp);
     const bool strum = down || up;
     const bool plusB = pressed(m.plusBtn);
     const bool minusB = pressed(m.minusBtn);
+    const bool palmB = pressed(m.palmBtn);
+    const bool flip = lefty.load();
 
     uiFretBits = combo;
 
@@ -888,13 +1184,15 @@ void GuitarService::step(const uint8_t* d, int len)
     }
     prevPlus = plusB;
 
-    // live control-test bits (settings panel highlights)
+    // live control-test bits (settings panel highlights) -- the physical
+    // controls, before lefty flip swaps anything
     {
         int bits = combo;
         if (down) bits |= 1 << LStrumDown;
         if (up) bits |= 1 << LStrumUp;
         if (plusB) bits |= 1 << LPlus;
         if (minusB) bits |= 1 << LMinus;
+        if (palmB) bits |= 1 << LPalm;
         if (m.stickX.valid() && m.stickX.byteIdx < len
             && std::abs((int) d[m.stickX.byteIdx] - m.stickX.center) > (m.stickX.hi - m.stickX.lo) / 5)
             bits |= 1 << LStickX;
@@ -904,7 +1202,14 @@ void GuitarService::step(const uint8_t* d, int len)
         uiButtonBits = bits;   // whammy bit added below
     }
 
-    // whammy -> pitch bend and/or CC20
+    // lefty flip: the guitar is turned over, so the bar's down stroke is the
+    // old up stroke
+    if (flip)
+        std::swap(down, up);
+
+    // whammy -> pitch bend (+ CC20), or palm mute
+    const bool palmMode = palmWhammy.load();
+    float wamt = 0.0f;
     if (m.whammy.valid() && m.whammy.byteIdx < len)
     {
         const int v = d[m.whammy.byteIdx];
@@ -912,28 +1217,38 @@ void GuitarService::step(const uint8_t* d, int len)
         amt = juce::jlimit(0.0f, 1.0f, amt);
         if (amt < 0.03f)
             amt = 0.0f;
-        uiWhammy = amt;
+        wamt = amt;
+        uiWhammy = palmMode ? 0.0f : amt;   // the highway wiggle is the bend
         if (amt > 0.05f)
             uiButtonBits = uiButtonBits.load() | (1 << LWhammy);
         // violent whammy motion shakes the strum bar into real contact
-        // bounces — flag the window so strum edges are ignored during it
-        if (std::abs(amt - prevWham) > 0.04f)
-            whamBusyUntil = now + 0.12;
-        prevWham = amt;
-        const int pb = 8192 - (int) (8191.0f * amt);
+        // bounces -- flag the window so strum edges are ignored during it.
+        // Measured over >= 4 ms so the faster poll rate doesn't hide it.
+        // (Palm mute holds the whammy still, and a strum right after
+        // pressing it must count.)
+        if (now - prevWhamAt >= 0.004)
+        {
+            if (! palmMode && std::abs(amt - prevWham) > 0.04f)
+                whamBusyUntil = now + 0.12;
+            prevWham = amt;
+            prevWhamAt = now;
+        }
+        const int pb = palmMode ? 8192 : 8192 - (int) (8191.0f * amt);
         if (pb != bend && (std::abs(pb - bend) > 64 || pb == 8192))
         {
             const int wm = whammyMode.load();
             if (wm != 2)
                 sendMsg(juce::MidiMessage::pitchWheel(1, pb));
-            if (wm != 1)
+            if (wm != 1 && ! palmMode)
                 sendMsg(juce::MidiMessage::controllerEvent(1, 20, juce::roundToInt(amt * 127.0f)));
             bend = pb;
         }
     }
+    const bool palm = palmB || (palmMode && wamt > kPalmWhammy);
 
-    // joystick flicks: left/right = key, up/down = octave (ignored while the
-    // whammy is in use — on some guitars the whammy bleeds into the joystick axes)
+    // joystick flicks: left/right = key, up/down = octave (SOLO: range).
+    // Ignored while the whammy is in use -- on some guitars the whammy bleeds
+    // into the joystick axes
     auto flick = [&](const StickMap& sm, int& pos) -> int
     {
         if (! sm.valid() || sm.byteIdx >= len)
@@ -950,17 +1265,18 @@ void GuitarService::step(const uint8_t* d, int len)
             pos = 0;
         return 0;
     };
-    if (uiWhammy.load() <= 0.05f)
+    if (wamt <= 0.05f)
     {
+        const int sgn = flip ? -1 : 1;   // upside down, the stick is too
         if (const int dx = flick(m.stickX, joyPos); dx != 0)
-            shiftKey(dx);
+            shiftKey(dx * sgn);
         // HID Y axes grow DOWNWARD: pushing the joystick up reads as a smaller
         // value, and up has to mean octave up
         if (const int dy = -flick(m.stickY, joyPosY); dy != 0)
-            shiftOctave(dy);
+            shiftOctave(dy * sgn);
     }
 
-    // strum edges + ~10ms latch so late fingers still join the combo
+    // strum edges + a short latch so late fingers still join the combo
     if (now >= whamBusyUntil && ((down && ! prevDown) || (up && ! prevUp)))
     {
         strumLatchAt = now;
@@ -974,60 +1290,70 @@ void GuitarService::step(const uint8_t* d, int len)
     for (int i = 4; i >= 0; --i)
         if (combo & (1 << i)) { topFretNow = i; break; }
 
-    if (strumLatchAt >= 0.0 && now - strumLatchAt >= 0.010)
+    if (strumLatchAt >= 0.0 && now - strumLatchAt >= kStrumLatchS)
     {
         strumLatchAt = -1.0;
-        const int strumTopFret = topFretNow;
-        // ghost-pulse filter: a real strum is still engaged 10ms after its
-        // edge; a one-report glitch (whammy leaking onto the strum contacts)
-        // has already vanished by now
+        // ghost-pulse filter: a real strum is still engaged after the latch;
+        // a one-report glitch (whammy leaking onto the strum contacts) has
+        // already vanished by now
         if (latchDown ? down : up)
         {
-            const int vel = latchVel;
+            const bool muted = palm && mode != Chart;
+            const int vel = muted ? juce::roundToInt((float) latchVel * kPalmVel) : latchVel;
+            const double rollS = juce::jlimit(0, 50, strumRollMs.load()) * 0.001;
             allOff();
             candCombo = -1;
             sustainOnAt = now;
             sustainOffPending = false;
+            int voices = 1;   // notes in this strum (for the palm choke)
             if (mode == Easy)
             {
                 if (combo != 0)
                 {
-                    int mask = combo;
-                    ChordDef cd;
-                    if (! chordForMask(mask, cd))
-                    {
-                        mask = 1 << strumTopFret;   // unmapped combo: top fret's chord
-                        chordForMask(mask, cd);
-                    }
-                    const int root = kChordRootBase + key + easyOct + cd.rootOff;
-                    const int third = root + cd.third;
-                    const int topNote = cd.seventh > 0 ? root + cd.seventh : root + 12;
-                    const int rollMs = juce::jlimit(0, 50, strumRollMs.load());
-                    int seq[5];
-                    if (latchDown)
-                    {
-                        const int t[5] = { root - 12, root, third, root + 7, topNote };
-                        std::memcpy(seq, t, sizeof(seq));
-                    }
+                    // the held shape, or (unmapped 3+ fret shapes) its top fret
+                    int slot = -1;
+                    for (int s2 = 0; s2 < kChordSlots; ++s2)
+                        if (kChordDefaults[s2].mask == combo) { slot = s2; break; }
+                    if (slot < 0)
+                        slot = juce::jmax(0, topFretNow);   // single-fret slots are 0..4
+                    const int mask = kChordDefaults[slot].mask;
+                    const auto& q = kQualities[chordQualA[slot].load()];
+                    const int root = kChordRootBase + key + easyOct + chordRootA[slot].load();
+                    // chord tones low -> high, then the strum order
+                    juce::Array<int> seq;
+                    if (muted)
+                        seq = { root - 12, root - 5, root };   // palm: low power chord
                     else
                     {
-                        const int t[5] = { third + 12, topNote == root + 12 ? root + 12 : topNote,
-                                           root + 7, third, root };
-                        std::memcpy(seq, t, sizeof(seq));
+                        juce::Array<int> tones { root };
+                        if (q.third >= 0) tones.add(root + q.third);
+                        tones.add(root + q.fifth);
+                        tones.add(q.top > 0 ? root + q.top : root + 12);
+                        if (latchDown)
+                        {
+                            seq.add(root - 12);
+                            seq.addArray(tones);
+                        }
+                        else
+                        {
+                            tones.add((q.third >= 0 ? root + q.third : root + q.fifth) + 12);
+                            for (int i = tones.size(); --i >= 0;)
+                                seq.add(tones[i]);
+                        }
                     }
-                    for (int i = 0; i < 5; ++i)
+                    for (int i = 0; i < seq.size(); ++i)
                     {
-                        noteOn(seq[i], vel);
-                        if (i < 4 && rollMs > 0)
-                            juce::Thread::sleep(rollMs);
+                        if (i == 0 || rollS <= 0.0) noteOn(seq[i], vel);
+                        else                        scheduleOn(seq[i], vel, now + rollS * i);
                     }
+                    voices = seq.size();
                     ringFret = mask;   // in CHORDS this holds the fret MASK
                     beginGem(mask, false);
-                    announce(juce::String(noteNames[root % 12]) + cd.suffix);
+                    announce(chordName(key, chordRootA[slot].load(), chordQualA[slot].load()));
                 }
                 else
                 {
-                    noteOn(kBassBase + key + easyOct, kVelDown);
+                    noteOn(kBassBase + key + easyOct, muted ? vel : kVelDown);
                     ringFret = -1;
                     beginGem(0, false);
                     announce(noteName(kBassBase + key + easyOct));
@@ -1045,29 +1371,28 @@ void GuitarService::step(const uint8_t* d, int len)
             {
                 if (combo != 0)
                 {
-                    const int rollMs = juce::jlimit(0, 50, strumRollMs.load());
                     juce::String names;
-                    bool first = true;
+                    int n = 0;
                     for (int k2 = 0; k2 < 5; ++k2)
                     {
                         const int i = latchDown ? k2 : 4 - k2;  // sweep direction
                         if (! (combo & (1 << i)))
                             continue;
-                        soloNotes[i] = pentaNote(key, octaveReal, i);
-                        if (! first && rollMs > 0)
-                            juce::Thread::sleep(rollMs);
-                        noteOn(soloNotes[i], vel);
-                        names += (first ? juce::String() : juce::String("+"))
+                        soloNotes[i] = soloNote(i);
+                        if (n == 0 || rollS <= 0.0) noteOn(soloNotes[i], vel);
+                        else                        scheduleOn(soloNotes[i], vel, now + rollS * n);
+                        names += (n == 0 ? juce::String() : juce::String("+"))
                                  + juce::String(noteNames[soloNotes[i] % 12]);
-                        first = false;
+                        ++n;
                     }
+                    voices = n;
                     ringFret = 1;   // marker: fretted (per-fret release)
                     beginGem(combo, false);
                     announce(names);
                 }
                 else
                 {
-                    const int pn = pentaNote(key, octaveReal, -1);
+                    const int pn = soloNote(kSoloOpen);
                     noteOn(pn, vel);
                     ringFret = -1;  // the open root follows the strum bar
                     beginGem(0, false);
@@ -1087,10 +1412,12 @@ void GuitarService::step(const uint8_t* d, int len)
                     announceFrets(combo);
                 }
             }
+            if (muted && ! ringing.isEmpty())
+                palmCutAt = now + rollS * (voices - 1) + kPalmS;
         }
     }
 
-    // release / legato
+    // release
     if (strumSustain.load())
     {
         // STRUM CONTROLS SUSTAIN: whatever is ringing lasts exactly while the
@@ -1158,12 +1485,11 @@ void GuitarService::step(const uint8_t* d, int len)
                     anyFretted = true;
                     if (! (combo & (1 << i)))
                     {
-                        sendMsg(juce::MidiMessage::noteOff(1, soloNotes[i]));
-                        ringing.removeValue(soloNotes[i]);
+                        releaseNote(soloNotes[i]);
                         soloNotes[i] = -1;
                     }
                 }
-            if (anyFretted && ringing.isEmpty())
+            if (anyFretted && ringing.isEmpty() && pending.isEmpty())
             {
                 endGem();
                 ringFret = -1;
@@ -1190,7 +1516,6 @@ void GuitarService::step(const uint8_t* d, int len)
                 endGem();
         }
     }
-
 }
 
 // ============================== GHMidiProcessor ==============================
@@ -1202,20 +1527,20 @@ GHMidiProcessor::GHMidiProcessor()
 
 GHMidiProcessor::~GHMidiProcessor()
 {
-    service->removeClient(&collector);
+    service->removeClient(&inbox);
 }
 
 void GHMidiProcessor::prepareToPlay(double sampleRate, int)
 {
-    collector.reset(sampleRate);
-    service->addClient(&collector);
+    inbox.prepare(sampleRate);
+    service->addClient(&inbox);
 }
 
 void GHMidiProcessor::processBlock(juce::AudioBuffer<float>& audio, juce::MidiBuffer& midi)
 {
     audio.clear();
     midi.clear();
-    collector.removeNextBlockOfMessages(midi, audio.getNumSamples());
+    inbox.popInto(midi, audio.getNumSamples());
 }
 
 void GHMidiProcessor::getStateInformation(juce::MemoryBlock& dest)

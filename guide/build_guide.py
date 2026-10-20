@@ -9,7 +9,7 @@ import os, subprocess, sys, time, shutil
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-VERSION = "1.1"
+VERSION = "1.2"
 SITE = "michaelloya.studio/gh-midi"
 REPO = "github.com/michaelloyastudio/gh-midi"
 
@@ -176,8 +176,9 @@ def p_welcome():
 <tr><td>08</td><td>NOTES mode</td><td>10</td></tr>
 <tr><td>09</td><td>SOLO mode</td><td>11</td></tr>
 <tr><td>10</td><td>CHART mode</td><td>12</td></tr>
-<tr><td>11</td><td>Settings &amp; other controllers</td><td>13</td></tr>
-<tr><td>12</td><td>Troubleshooting</td><td>14</td></tr>
+<tr><td>11</td><td>Make it yours: frets, palm mute, lefty</td><td>13</td></tr>
+<tr><td>12</td><td>Settings &amp; other controllers</td><td>14</td></tr>
+<tr><td>13</td><td>Troubleshooting</td><td>15</td></tr>
 </table>"""
 
 def p_install():
@@ -236,16 +237,16 @@ def p_daw():
 
 def p_controller():
     return h2("04", "Your controller") + f"""
-<p>Pre-mapped for a <b>Wii Guitar Hero guitar</b> on a <b>raphnet WUSBMote</b> adapter. Other USB controllers: section 11.</p>
+<p>Pre-mapped for a <b>Wii Guitar Hero guitar</b> on a <b>raphnet WUSBMote</b> adapter. Other USB controllers: section 12.</p>
 <div class="figure">{GUITAR_SVG}</div>
 <table>
 <tr><th style="width:24%">Control</th><th>Does</th></tr>
 <tr><td><b>Frets</b></td><td>Pick the chord or note. Patterns are written {pat("G-Y--")} in this guide.</td></tr>
 <tr><td><b>Strum bar</b></td><td>Makes the sound. Down and up are separate. In CHORDS they are two voicings; up is softer.</td></tr>
-<tr><td><b>Whammy</b></td><td>Bends the pitch down.</td></tr>
+<tr><td><b>Whammy</b></td><td>Bends the pitch down. Or palm mute: section 11.</td></tr>
 <tr><td><b>Minus</b></td><td>Next mode: CHORDS → NOTES → SOLO → CHART.</td></tr>
 <tr><td><b>Plus</b></td><td>Strum spread, 0 to 50 ms, then back to 0.</td></tr>
-<tr><td><b>Joystick</b></td><td>Left / right = key. Up / down = octave.</td></tr>
+<tr><td><b>Joystick</b></td><td>Left / right = key. Up / down = octave (in SOLO: range).</td></tr>
 </table>
 <h3>WUSBMote adapter</h3>
 <p>The WUSBMote only finds the guitar <b>when it gets power</b>. If the screen says <i>adapter can't see the guitar</i>: unplug USB, seat the guitar plug, plug USB back in.</p>"""
@@ -256,13 +257,13 @@ def p_screen():
     return h2("05", "The screen") + f"""
 <div class="shotwrap mid"><img class="shot" src="assets/ui-chords.jpg" alt="">{dots}</div>
 <table class="legend">
-<tr><td><span class="cn">1</span></td><td><b>? and SETTINGS</b> — quick controls reminder, and the settings panel.</td></tr>
+<tr><td><span class="cn">1</span></td><td><b>FRETS, ? and SETTINGS</b> — change what each fret plays, a quick controls reminder, and the settings panel.</td></tr>
 <tr><td><span class="cn">2</span></td><td><b>What you played</b> — the chord or note name, and every setting change.</td></tr>
 <tr><td><span class="cn">3</span></td><td><b>The highway</b> — your notes travel away as gems. Held notes trail; the whammy wiggles them.</td></tr>
 <tr><td><span class="cn">4</span></td><td><b>MODE</b> — CHORDS, NOTES, SOLO or CHART. Arrows or minus.</td></tr>
 <tr><td><span class="cn">5</span></td><td><b>STRUM SPREAD</b> — milliseconds between the notes of a strum. 0 = stab, 30+ = slow sweep. Arrows or plus.</td></tr>
 <tr><td><span class="cn">6</span></td><td><b>KEY</b> — the key everything is built in. In NOTES this reads <b>BASE</b>, the lowest note. Arrows or joystick left / right.</td></tr>
-<tr><td><span class="cn">7</span></td><td><b>OCTAVE</b> — −3 to +3. Arrows or joystick up / down.</td></tr>
+<tr><td><span class="cn">7</span></td><td><b>OCTAVE</b> — −3 to +3. In SOLO this reads <b>RANGE</b>: the note on the green fret. Arrows or joystick up / down.</td></tr>
 <tr><td><span class="cn">8</span></td><td><b>SUSTAIN</b> — FRET: a note lasts while its fret is held. STRUM: while the strum bar is held.</td></tr>
 </table>
 <p class="muted">The gold tag under each setting is the guitar control that changes it. It lights up while you touch that control.</p>"""
@@ -277,11 +278,11 @@ def p_playing():
 <tr><td>Let go</td><td>It stops. In SOLO, only that fret's note stops.</td></tr>
 <tr><td>Change frets without strumming</td><td>Nothing, until the next strum.</td></tr>
 <tr><td>Strum with no frets</td><td>The open note: a low root in CHORDS and SOLO, the base note in NOTES. Rings while the bar is held.</td></tr>
-<tr><td>Push the whammy</td><td>The pitch bends down, and back when you release.</td></tr>
+<tr><td>Push the whammy</td><td>The pitch bends down, and back when you release. (Palm mute mode: notes come out short and chunky.)</td></tr>
 </table>
 
 <h3>Key and octave</h3>
-<p>Joystick right moves everything up a semitone, left down. Up and down move an octave, up to three either way. The key name pops on screen.</p>
+<p>Joystick right moves everything up a semitone, left down. Up and down move an octave, up to three either way. The key name pops on screen. In SOLO, up and down slide the five frets one scale note at a time instead.</p>
 
 <h3>Strum spread</h3>
 <p>Chords and SOLO stacks are strummed: low to high on a down-strum, high to low on an up. Strum spread is the gap between the notes. 0 for stabs, 10 for a natural pick, 30+ for a slow sweep.</p>
@@ -388,8 +389,10 @@ def p_solo():
 <img class="shot" src="assets/ui-solo.jpg" alt="" style="margin-top:4pt">
 </div>
 </div>
+<h3>Range</h3>
+<p>Joystick up / down (or the RANGE arrows) slides all five frets one scale note up or down. Five slides = an octave. The screen shows the note on the green fret. The open note stays the low root.</p>
 <h3>With CHORDS</h3>
-<p>Record a CHORDS part, press minus to switch to SOLO, play over it. Both modes share the same KEY. Use OCTAVE to put the solo above the chords.</p>"""
+<p>Record a CHORDS part, press minus to switch to SOLO, play over it. Both modes share the same KEY. Slide RANGE up to put the solo above the chords.</p>"""
 
 def p_chart():
     lanes = [("Expert", 96), ("Hard", 84), ("Medium", 72), ("Easy", 60)]
@@ -419,8 +422,29 @@ def p_chart():
 </div>
 <img class="shot small" src="assets/ui-chart.jpg" alt="">"""
 
+def p_custom():
+    return h2("11", "Make it yours") + """
+<h3>Change what a fret plays</h3>
+<div class="cols">
+<div>
+<p>Press <b>FRETS</b> at the top of the screen. Every fret shape is listed with what it plays now. Click one and pick something else.</p>
+<p><b>CHORDS</b> tab: the five single frets and all ten two-fret pairs. The menu starts with the chords of your key, then their sevenths, then common chords from outside the key. <b>ANY CHORD</b> has every chord on every root.</p>
+<p><b>SOLO</b> tab: the five frets and the open strum. The menu lists the notes of your key, low to high. <b>OTHER NOTES</b> has the rest.</p>
+<p>Press frets on the guitar and their row lights up. <b>RESET TO DEFAULT</b> puts the tab back.</p>
+<p class="muted">Your picks follow the key. Change key and they move with it.</p>
+</div>
+<div>
+<img class="shot" src="assets/ui-frets.jpg" alt="">
+</div>
+</div>
+<h3>Palm mute</h3>
+<p>On a real guitar you rest your palm on the strings by the bridge. Notes come out short, quiet and chunky (the chug in metal and pop-punk). In <b>SETTINGS → Whammy → PALM MUTE</b> the whammy does it: hold it down and strum. Notes are choked after a moment, played softer, and chords become low power chords. Let go of the whammy to ring out normally. The whammy stops bending in this mode.</p>
+<p class="muted">A controller with a spare button can palm mute with that instead: LEARN it on the PALM MUTE row (section 12).</p>
+<h3>Lefty flip</h3>
+<p><b>SETTINGS → Lefty flip.</b> The highway mirrors (green on the right), and the strum bar and joystick are reversed to match a guitar played upside down.</p>"""
+
 def p_settings():
-    return h2("11", "Settings &amp; other controllers") + """
+    return h2("12", "Settings &amp; other controllers") + """
 <div class="cols">
 <div>
 <img class="shot" src="assets/ui-settings.jpg" alt="">
@@ -429,7 +453,9 @@ def p_settings():
 <h3>Controller</h3>
 <p>Which USB device GH MIDI listens to. RESCAN after plugging something in. Each controller keeps its own mapping.</p>
 <h3>Mapping table</h3>
-<p>One row per control. Press <b>LEARN</b> on a row, then press (or sweep) that control on the guitar. <b>X</b> clears a row. Rows light up as you touch controls.</p>
+<p>One row per control. Press <b>LEARN</b> on a row, then press (or sweep) that control on the guitar. <b>X</b> clears a row. Rows light up as you touch controls. <b>PALM MUTE</b> starts empty: map a spare button to it if you have one.</p>
+<h3>Lefty flip, Whammy</h3>
+<p>Section 11.</p>
 <h3>Virtual MIDI output</h3>
 <p>The system-wide <b>GH MIDI</b> input. Leave it on.</p>
 </div>
@@ -441,14 +467,16 @@ def p_settings():
 <p><code>~/Library/Application Support/GH MIDI/settings.json</code>. Delete it to start over. The app and plugin always start in CHORDS.</p>"""
 
 def p_trouble():
-    return h2("12", "Troubleshooting") + f"""
+    return h2("13", "Troubleshooting") + f"""
 <table class="trouble">
 <tr><th style="width:34%">It says / it does</th><th>Try</th></tr>
 <tr><td><b>CONTROLLER NOT FOUND</b></td><td>Plug the guitar in. SETTINGS → Controller → pick it → RESCAN. Still nothing: allow your DAW under System Settings → Privacy &amp; Security → Input Monitoring. Make sure the app and the plugin aren't both running.</td></tr>
 <tr><td><b>ADAPTER CAN'T SEE THE GUITAR</b></td><td>Unplug the adapter's USB, seat the guitar plug, plug USB back in.</td></tr>
 <tr><td>Nothing happens when I strum</td><td>If the gold name pops on screen, MIDI isn't reaching an instrument: section 03.</td></tr>
 <tr><td>The plugin's own track is silent</td><td>Normal. It makes no audio. Route its MIDI to an instrument.</td></tr>
-<tr><td>Whammy doesn't bend the pitch</td><td>Some presets ignore pitch bend. Link CC 20 to a pitch or filter knob instead.</td></tr>
+<tr><td>It feels laggy</td><td>Lower the audio buffer in your DAW's audio settings: 128 or 256 samples. Set STRUM SPREAD to 0 for chords that hit all at once.</td></tr>
+<tr><td>A fret's chord doesn't fit my song</td><td>FRETS → click it → pick another (section 11).</td></tr>
+<tr><td>Whammy doesn't bend the pitch</td><td>Check SETTINGS → Whammy is on BEND. Some presets ignore pitch bend: link CC 20 to a pitch or filter knob instead.</td></tr>
 <tr><td>A strum triggers twice, or the key changes on its own</td><td>Whammy motion leaking into other contacts. Ease off the whammy, or strum a moment after it.</td></tr>
 <tr><td>The key jumped</td><td>The joystick was bumped. Flick it the other way. The screen shows the key.</td></tr>
 <tr><td>It crashed my DAW</td><td>Send the report from ~/Library/Logs/DiagnosticReports and what you were doing to the address below.</td></tr>
@@ -572,8 +600,9 @@ def build_html():
         page(p_notes(), "NOTES mode", 10),
         page(p_solo(), "SOLO mode", 11),
         page(p_chart(), "CHART mode", 12),
-        page(p_settings(), "Settings", 13),
-        page(p_trouble(), "Troubleshooting", 14),
+        page(p_custom(), "Make it yours", 13),
+        page(p_settings(), "Settings", 14),
+        page(p_trouble(), "Troubleshooting", 15),
     ]
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>GH MIDI User Guide</title>

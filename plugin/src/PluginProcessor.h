@@ -1,6 +1,46 @@
 #pragma once
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <hidapi.h>
+#include <vector>
+
+// Hand-off from the guitar thread to processBlock. juce::MidiMessageCollector
+// delays every event by a whole audio block to keep the spacing exact; this
+// plays everything at the START of the next block instead (lowest latency),
+// keeping only the spacing inside one batch (a rolled chord) relative to its
+// first event.
+class MidiInbox
+{
+public:
+    void prepare(double sr)
+    {
+        const juce::SpinLock::ScopedLockType l(lock);
+        sampleRate = sr > 0.0 ? sr : 44100.0;
+        queue.clear();
+        queue.reserve(512);
+    }
+    void push(const juce::MidiMessage& m)
+    {
+        const juce::SpinLock::ScopedLockType l(lock);
+        if (queue.size() < 1024)
+            queue.push_back(m);
+    }
+    void popInto(juce::MidiBuffer& out, int numSamples)
+    {
+        const juce::SpinLock::ScopedLockType l(lock);
+        if (queue.empty())
+            return;
+        const double t0 = queue.front().getTimeStamp();
+        const int last = juce::jmax(0, numSamples - 1);
+        for (const auto& m : queue)
+            out.addEvent(m, juce::jlimit(0, last, (int) ((m.getTimeStamp() - t0) * sampleRate)));
+        queue.clear();
+    }
+
+private:
+    juce::SpinLock lock;
+    std::vector<juce::MidiMessage> queue;
+    double sampleRate = 44100.0;
+};
 
 // One process-wide guitar reader shared by every GH MIDI instance.
 //
@@ -36,7 +76,7 @@ public:
     };
     struct ControllerMap
     {
-        ButtonMap frets[5], strumDown, strumUp, plusBtn, minusBtn;
+        ButtonMap frets[5], strumDown, strumUp, plusBtn, minusBtn, palmBtn;
         AxisMap whammy;
         StickMap stickX, stickY;
     };
@@ -50,14 +90,15 @@ public:
     GuitarService();
     ~GuitarService() override;
 
-    void addClient(juce::MidiMessageCollector* c);
-    void removeClient(juce::MidiMessageCollector* c);
+    void addClient(MidiInbox* c);
+    void removeClient(MidiInbox* c);
 
     // ---- live state for editors ----
     std::atomic<int> uiFretBits { 0 };
     std::atomic<int> uiMode { Easy };
     std::atomic<int> uiKey { 0 };
-    std::atomic<int> uiOctave { 0 };     // NOTES / SOLO octave offset (semitones)
+    std::atomic<int> uiOctave { 0 };     // NOTES octave offset (semitones)
+    std::atomic<int> uiSoloStep { 0 };   // SOLO range: scale steps (5 = one octave)
     std::atomic<int> uiEasyOct { 0 };    // CHORDS octave offset (semitones)
     std::atomic<float> uiWhammy { 0.0f };
     std::atomic<bool> guitarFound { false };
@@ -72,7 +113,34 @@ public:
     std::atomic<int> whammyMode { 0 };      // 0 = bend + CC20, 1 = bend, 2 = CC20
     std::atomic<bool> virtualMidiOn { true };
     std::atomic<bool> strumSustain { false }; // on: a note lasts while the strum BAR is held, not the fret
-    std::atomic<int> strumRollMs { 10 };   // ms between rolled chord notes (0 = off)  // "GH MIDI" virtual source for DAW note recording
+    std::atomic<int> strumRollMs { 10 };   // ms between rolled chord notes (0 = off)
+    std::atomic<bool> lefty { false };      // lefty flip: mirrored highway, strum + joystick reversed
+    std::atomic<bool> palmWhammy { false }; // whammy = palm mute instead of bend
+
+    // ---- fret editor: what each fret plays, stored relative to the key ----
+    // CHORDS: 15 shapes (5 single frets, then the 10 two-fret pairs), each a
+    // chord root (semitones above the key) + quality. SOLO: 5 frets + open,
+    // each a note (semitones above the key's root, before the range shift).
+    static constexpr int kChordSlots = 15, kSoloSlots = 6, kSoloOpen = 5;
+    static constexpr int kSoloStepMin = -15, kSoloStepMax = 15;
+    static int chordSlotMask(int slot);
+    static int numQualities();
+    static juce::String qualitySuffix(int q);
+    static juce::String chordName(int key, int root, int quality);
+    static juce::String noteName(int midiNote);
+    static int defaultChordRoot(int slot);
+    static int defaultChordQuality(int slot);
+    static int defaultSoloOffset(int slot);
+    static int soloShift(int offset, int steps);    // slide a note along the key's scale
+    int chordRoot(int slot) const    { return chordRootA[slot].load(); }
+    int chordQuality(int slot) const { return chordQualA[slot].load(); }
+    int soloOffset(int slot) const   { return soloOffA[slot].load(); }
+    int soloNote(int slot) const { return soloNoteWith(slot, soloOffA[juce::jlimit(0, kSoloSlots - 1, slot)].load()); }
+    int soloNoteWith(int slot, int offset) const;   // what that fret would play with this note, at the current key + range
+    void setChordSlot(int slot, int root, int quality);
+    void setSoloSlot(int slot, int offset);
+    void resetChordSlots();
+    void resetSoloSlots();
 
     // ---- MIDI output port ----
     // macOS/Linux publish a virtual "GH MIDI" source. Windows has no virtual
@@ -123,7 +191,7 @@ public:
     // per-control mapping: each row learned or cleared independently
     enum LearnTarget { LFretG = 0, LFretR, LFretY, LFretB, LFretO,
                        LStrumDown, LStrumUp, LPlus, LMinus, LWhammy, LStickX, LStickY,
-                       LTargetCount };
+                       LPalm, LTargetCount };
     void startLearn(int target) { learnTarget = juce::jlimit(0, LTargetCount - 1, target); learnPhase = 0; learnT0req = true; notify(); }
     void cancelLearn() { learnTarget = -1; }
     int getLearnTarget() const { return learnTarget.load(); }
@@ -156,6 +224,10 @@ public:
 private:
     void run() override;
     void demoRun();
+    void selfTestRun();             // GHMIDI_SELFTEST=<log> (standalone only): synthetic input, MIDI logged
+    bool selfTest = false;
+    double selfTestT0 = 0.0;
+    juce::String selfTestLog;
     void step(const uint8_t* d, int len);
     void learnTick(const uint8_t* d, int len, double now);
     void scanDevices();
@@ -169,11 +241,14 @@ private:
     std::unique_ptr<juce::FileLogger> demoLogger;   // demo mode only: milestones + crash backtrace
     void sendMsg(const juce::MidiMessage& m);
     void noteOn(int note, int vel);
+    void scheduleOn(int note, int vel, double due);   // rolled chord notes: no sleeping on the poll thread
+    void releaseNote(int note);                       // off if it sounded, dropped if still scheduled
+    void flushPending(double now);
     void allOff();
     void announce(const juce::String& s);
 
     juce::CriticalSection clientLock;
-    juce::Array<juce::MidiMessageCollector*> clients;
+    juce::Array<MidiInbox*> clients;
     std::unique_ptr<juce::MidiOutput> virtualOut;  // created/destroyed on the guitar thread
     std::unique_ptr<juce::MidiOutput> portOut;     // user-picked port (guitar thread only)
     mutable juce::CriticalSection midiOutLock;
@@ -216,7 +291,11 @@ private:
     void shiftOctave(int d);
     void setStrum(int ms);
     int mode = Easy;
-    int key = 0, octaveReal = 0, easyOct = 0;
+    int key = 0, octaveReal = 0, easyOct = 0, soloStep = 0;
+    std::atomic<int> chordRootA[kChordSlots], chordQualA[kChordSlots], soloOffA[kSoloSlots];
+    struct Pending { double due; int note; int vel; };
+    juce::Array<Pending> pending;    // scheduled note-ons (guitar thread only)
+    double palmCutAt = -1.0;         // palm mute: when the ringing notes get choked
     bool prevDown = false, prevUp = false, prevPlus = false, prevMinus = false;
     double strumLatchAt = -1.0;
     int latchVel = 100;
@@ -232,6 +311,7 @@ private:
     double lastLegatoAt = -1.0;
     int joyPos = 0, joyPosY = 0;
     float prevWham = 0.0f;
+    double prevWhamAt = 0.0;
     double whamBusyUntil = -1.0;
     int bend = 0;
 
@@ -254,7 +334,7 @@ public:
     ~GHMidiProcessor() override;
 
     void prepareToPlay(double sampleRate, int samplesPerBlock) override;
-    void releaseResources() override { service->removeClient(&collector); }
+    void releaseResources() override { service->removeClient(&inbox); }
     void processBlock(juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
 
     juce::AudioProcessorEditor* createEditor() override;
@@ -279,7 +359,7 @@ public:
 
 private:
     juce::SharedResourcePointer<GuitarService> service;
-    juce::MidiMessageCollector collector;
+    MidiInbox inbox;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(GHMidiProcessor)
 };

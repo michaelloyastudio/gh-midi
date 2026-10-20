@@ -13,7 +13,7 @@ so rewriting the guide and re-running this is all it takes to ship it.
 """
 import hashlib, shutil, subprocess, sys, pathlib
 
-VER   = sys.argv[1] if len(sys.argv) > 1 else 'v1.1'
+VER   = sys.argv[1] if len(sys.argv) > 1 else 'v1.2'
 ROOT  = pathlib.Path(__file__).parent
 BUILT = ROOT / 'plugin/build/GHMidi_artefacts/Release'
 REL   = ROOT / 'release'

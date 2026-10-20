@@ -23,7 +23,10 @@ const float laneColours[5][3] = {
 };
 const float openColour[3] = { 0.63f, 0.37f, 0.94f };
 
-float laneXw(int lane) { return (lane - 2) * kLaneW; }
+// lefty flip mirrors the highway: green on the right. Set once per frame on
+// the GL thread.
+bool gLefty = false;
+float laneXw(int lane) { return (gLefty ? 2 - lane : lane - 2) * kLaneW; }
 
 float zForAge(double age)
 {
@@ -538,6 +541,7 @@ void HighwayRenderer::renderOpenGL()
     const double now = juce::Time::getMillisecondCounterHiRes() * 0.001;
     const float t = (float) std::fmod(now - startTime, 4096.0);
     frameT = t;
+    gLefty = proc.guitar().lefty.load();
     const float scale = (float) context->getRenderingScale();
     const uint64_t vs = viewSize.load();
     const int wPx = juce::jmax(1, juce::roundToInt(scale * (float) (int) (vs >> 32)));

@@ -18,16 +18,30 @@ real-time 3D note highway rendered in OpenGL.
   fully chromatic notes: 32 per octave position. A real instrument you have
   to learn.
 - **SOLO** — each fret is one note of the key's pentatonic scale. Every note
-  fits over every chord.
+  fits over every chord. RANGE slides the five frets along the scale one note
+  at a time.
 - **CHART** — each fret sends its Clone Hero lane note, all four difficulties
   at once. Record a rough chart in your DAW, export the .mid, finish it in
   Moonscraper.
 
-Whammy = pitch bend (+ CC20 for knob-linking). Minus cycles modes, plus taps
+Whammy = pitch bend (+ CC20 for knob-linking), or palm mute (short, soft,
+power-chord chugs) if you pick that in SETTINGS. Minus cycles modes, plus taps
 through strum speeds, the joystick changes key (left/right) and octave
-(up/down, ±3 octaves in every mode) — and on-screen arrows do all four for
-controllers without a joystick. Any HID controller can be mapped
-from the in-plugin settings (per-control LEARN, live input testing).
+(up/down, ±3 octaves; in SOLO it slides the range) — and on-screen arrows do
+all four for controllers without a joystick. Any HID controller can be mapped
+from the in-plugin settings (per-control LEARN, live input testing), including
+an optional palm-mute button. Lefty flip mirrors the highway and reverses the
+strum bar and joystick.
+
+**FRETS** opens the fret editor: click any fret shape and pick what it plays.
+CHORDS menus list the key's chords first (then sevenths, borrowed chords and
+every chord on every root); SOLO menus list the key's notes. Choices are
+stored relative to the key, so they follow key changes.
+
+**Latency:** the guitar is polled about every millisecond, strums wait 4 ms
+for late fingers (was 10), rolled chords are scheduled instead of sleeping the
+poll thread, plugin MIDI lands at the start of the next audio block, and the
+Windows build asks for 1 ms timers. The rest is your audio buffer size.
 
 **No DAW required.** The release also ships a standalone app: while it runs
 on a Mac, every DAW and synth app sees a MIDI input called "GH MIDI" (Logic,

@@ -1,6 +1,7 @@
 #include "PluginEditor.h"
 #include <BinaryData.h>
 #include <cstdlib>
+#include <set>
 
 namespace {
 const juce::Colour gemColours[5] = {
@@ -29,13 +30,38 @@ const juce::String arrowU(juce::CharPointer_UTF8("\xE2\x96\xB2"));   // up-point
 const juce::String arrowD(juce::CharPointer_UTF8("\xE2\x96\xBC"));   // down-pointing triangle
 const juce::String arrowNE(juce::CharPointer_UTF8("\xE2\x86\x97"));  // north-east arrow
 
+const char* kVersion = "v1.2";
+
 juce::Rectangle<int> panelBounds(int W, int H)
 {
-    return { W / 2 - 250, H / 2 - 240, 500, 480 };
+    return { W / 2 - 250, H / 2 - 250, 500, 500 };
 }
 juce::Rectangle<int> helpBounds(int W, int H)
 {
-    return { W / 2 - 230, H / 2 - 205, 460, 410 };
+    return { W / 2 - 230, H / 2 - 215, 460, 430 };
+}
+// FRETS editor: CHORDS = one-fret column + two-fret column, SOLO = one column.
+// Each row: five gem tabs, then the clickable chord/note button.
+juce::Rectangle<int> fretsBounds(int W, int H)
+{
+    return { W / 2 - 260, H / 2 - 220, 520, 440 };
+}
+int fretsTop(juce::Rectangle<int> fb) { return fb.getY() + 74; }
+juce::Point<int> chordRowPos(int slot, juce::Rectangle<int> fb)
+{
+    if (slot < 5)
+        return { fb.getX() + 30, fretsTop(fb) + 18 + slot * 27 };
+    return { fb.getX() + 276, fretsTop(fb) + 18 + (slot - 5) * 27 };
+}
+juce::Point<int> soloRowPos(int slot, juce::Rectangle<int> fb)
+{
+    return { fb.getX() + 30, fretsTop(fb) + 18 + slot * 30 };
+}
+// the note a SOLO fret plays, as a scale step of the key
+juce::String degreeName(int note, int key)
+{
+    static const char* deg[12] = { "1  root", "b2", "2", "b3", "3", "4", "#4", "5", "b6", "6", "b7", "7" };
+    return deg[((note - key) % 12 + 12) % 12];
 }
 // bottom row: MODE / STRUM / KEY / OCTAVE plate — label row, value row with
 // arrows, then a badge naming the guitar control (minus and plus side by side)
@@ -57,9 +83,49 @@ GHMidiEditor::GHMidiEditor(GHMidiProcessor& p)
     context.attachTo(*this);
 
     addAndMakeVisible(gearBtn);
-    gearBtn.onClick = [this] { setHelpVisible(false); setPanelVisible(! panelOpen); };
+    gearBtn.onClick = [this] { setHelpVisible(false); setFretsVisible(false); setPanelVisible(! panelOpen); };
     addAndMakeVisible(helpBtn);
-    helpBtn.onClick = [this] { setPanelVisible(false); setHelpVisible(! helpOpen); };
+    helpBtn.onClick = [this] { setPanelVisible(false); setFretsVisible(false); setHelpVisible(! helpOpen); };
+    addAndMakeVisible(fretsBtn);
+    fretsBtn.onClick = [this] { setPanelVisible(false); setHelpVisible(false); setFretsVisible(! fretsOpen); };
+
+    // FRETS editor
+    for (auto* b : { &fretsTabChords, &fretsTabSolo })
+    {
+        addChildComponent(*b);
+        b->setWantsKeyboardFocus(false);
+        b->setClickingTogglesState(true);
+        b->setRadioGroupId(1002);
+        b->setColour(juce::TextButton::buttonOnColourId, gold);
+        b->setColour(juce::TextButton::textColourOnId, juce::Colour(0xff15151f));
+    }
+    fretsTabChords.setConnectedEdges(juce::Button::ConnectedOnRight);
+    fretsTabSolo.setConnectedEdges(juce::Button::ConnectedOnLeft);
+    fretsTabChords.onClick = [this] { setFretsTab(0); };
+    fretsTabSolo.onClick   = [this] { setFretsTab(1); };
+    addChildComponent(fretsResetBtn);
+    fretsResetBtn.onClick = [this]
+    {
+        if (fretsTab == 0) proc.guitar().resetChordSlots();
+        else               proc.guitar().resetSoloSlots();
+        refreshFretButtons();
+    };
+    addChildComponent(fretsCloseBtn);
+    fretsCloseBtn.onClick = [this] { setFretsVisible(false); };
+    for (int i = 0; i < GuitarService::kChordSlots; ++i)
+    {
+        auto* b = chordSlotBtns.add(new juce::TextButton());
+        addChildComponent(b);
+        b->setWantsKeyboardFocus(false);
+        b->onClick = [this, i] { showChordMenu(i); };
+    }
+    for (int i = 0; i < GuitarService::kSoloSlots; ++i)
+    {
+        auto* b = soloSlotBtns.add(new juce::TextButton());
+        addChildComponent(b);
+        b->setWantsKeyboardFocus(false);
+        b->onClick = [this, i] { showSoloMenu(i); };
+    }
 
     // sustain selector: a radio pair, the active side in gold
     sustainLabel.setText("SUSTAIN", juce::dontSendNotification);
@@ -175,6 +241,27 @@ GHMidiEditor::GHMidiEditor(GHMidiProcessor& p)
         proc.guitar().virtualMidiOn = vmidiToggle.getToggleState();
         proc.guitar().requestSave();
     };
+    addChildComponent(leftyToggle);
+    leftyToggle.onClick = [this]
+    {
+        proc.guitar().lefty = leftyToggle.getToggleState();
+        proc.guitar().requestSave();
+    };
+    initLabel(whammyLabel, "Whammy");
+    whammyLabel.setJustificationType(juce::Justification::centredRight);
+    for (auto* b : { &whamBendBtn, &whamPalmBtn })
+    {
+        addChildComponent(*b);
+        b->setWantsKeyboardFocus(false);
+        b->setClickingTogglesState(true);
+        b->setRadioGroupId(1003);
+        b->setColour(juce::TextButton::buttonOnColourId, gold);
+        b->setColour(juce::TextButton::textColourOnId, juce::Colour(0xff15151f));
+    }
+    whamBendBtn.setConnectedEdges(juce::Button::ConnectedOnRight);
+    whamPalmBtn.setConnectedEdges(juce::Button::ConnectedOnLeft);
+    whamBendBtn.onClick = [this] { proc.guitar().palmWhammy = false; proc.guitar().requestSave(); };
+    whamPalmBtn.onClick = [this] { proc.guitar().palmWhammy = true;  proc.guitar().requestSave(); };
     addChildComponent(closeBtn);
     closeBtn.onClick = [this]
     {
@@ -196,6 +283,8 @@ GHMidiEditor::GHMidiEditor(GHMidiProcessor& p)
     if (auto* env = std::getenv("GHMIDI_HUDSNAP"); env != nullptr && juce::JUCEApplicationBase::isStandaloneApp())
     {
         hudSnapDir = env;
+        if (std::getenv("GHMIDI_LEFTY") != nullptr)   // dev: check the mirrored highway
+            proc.guitar().lefty = true;
         juce::Logger::writeToLog("editor: created, HUD snapshots -> " + hudSnapDir);
     }
 
@@ -205,9 +294,11 @@ GHMidiEditor::GHMidiEditor(GHMidiProcessor& p)
 
 void GHMidiEditor::saveHudSnapshot(const juce::String& name)
 {
-    juce::Image img(juce::Image::ARGB, getWidth(), getHeight(), true);   // transparent: composite over a GL frame
+    // 2x, transparent: composited over a (2x) GL frame for the guide's screenshots
+    juce::Image img(juce::Image::ARGB, getWidth() * 2, getHeight() * 2, true);
     {
         juce::Graphics g(img);
+        g.addTransform(juce::AffineTransform::scale(2.0f));
         paintEntireComponent(g, false);
     }
     const auto file = juce::File(hudSnapDir).getChildFile("hud_" + name + ".png");
@@ -227,9 +318,10 @@ void GHMidiEditor::setPanelVisible(bool visible)
 {
     panelOpen = visible;
     for (auto* c : { (juce::Component*) &sustainLabel, (juce::Component*) &sustainFretBtn, (juce::Component*) &sustainStrumBtn })
-        c->setVisible(! visible && ! helpOpen);
+        c->setVisible(! panelOpen && ! helpOpen && ! fretsOpen);
     for (auto* c : std::initializer_list<juce::Component*> {
-             &deviceLabel, &deviceBox, &rescanBtn, &closeBtn, &learnHint })
+             &deviceLabel, &deviceBox, &rescanBtn, &closeBtn, &learnHint,
+             &leftyToggle, &whammyLabel, &whamBendBtn, &whamPalmBtn })
         c->setVisible(visible);
     vmidiToggle.setVisible(visible && GuitarService::kHasVirtualMidi);
     midiOutLabel.setVisible(visible && ! GuitarService::kHasVirtualMidi);
@@ -245,6 +337,7 @@ void GHMidiEditor::setPanelVisible(bool visible)
     {
         proc.guitar().requestDeviceScan();
         vmidiToggle.setToggleState(proc.guitar().virtualMidiOn.load(), juce::dontSendNotification);
+        syncSettingsButtons();
         refreshMidiOutBox();
         refreshMappingRows();
     }
@@ -265,16 +358,157 @@ void GHMidiEditor::setHelpVisible(bool visible)
 {
     helpOpen = visible;
     for (auto* c : { (juce::Component*) &sustainLabel, (juce::Component*) &sustainFretBtn, (juce::Component*) &sustainStrumBtn })
-        c->setVisible(! visible && ! panelOpen);
+        c->setVisible(! panelOpen && ! helpOpen && ! fretsOpen);
     helpCloseBtn.setVisible(visible);
     moreBtn.setVisible(visible);
     updateHudButtons();
     repaint();
 }
 
+void GHMidiEditor::syncSettingsButtons()
+{
+    auto& svc = proc.guitar();
+    leftyToggle.setToggleState(svc.lefty.load(), juce::dontSendNotification);
+    whamPalmBtn.setToggleState(svc.palmWhammy.load(), juce::dontSendNotification);
+    whamBendBtn.setToggleState(! svc.palmWhammy.load(), juce::dontSendNotification);
+}
+
+void GHMidiEditor::setFretsVisible(bool visible)
+{
+    fretsOpen = visible;
+    for (auto* c : { (juce::Component*) &sustainLabel, (juce::Component*) &sustainFretBtn, (juce::Component*) &sustainStrumBtn })
+        c->setVisible(! panelOpen && ! helpOpen && ! fretsOpen);
+    for (auto* c : { (juce::Component*) &fretsTabChords, (juce::Component*) &fretsTabSolo,
+                     (juce::Component*) &fretsResetBtn, (juce::Component*) &fretsCloseBtn })
+        c->setVisible(visible);
+    // open on the tab for the mode being played
+    const int mode = proc.guitar().uiMode.load() % 4;
+    setFretsTab(! visible ? fretsTab : mode == GuitarService::Penta ? 1 : mode == GuitarService::Easy ? 0 : fretsTab);
+    updateHudButtons();
+    repaint();
+}
+
+void GHMidiEditor::setFretsTab(int tab)
+{
+    fretsTab = tab;
+    fretsTabChords.setToggleState(tab == 0, juce::dontSendNotification);
+    fretsTabSolo.setToggleState(tab == 1, juce::dontSendNotification);
+    for (auto* b : chordSlotBtns) b->setVisible(fretsOpen && tab == 0);
+    for (auto* b : soloSlotBtns)  b->setVisible(fretsOpen && tab == 1);
+    refreshFretButtons();
+    repaint();
+}
+
+void GHMidiEditor::refreshFretButtons()
+{
+    auto& svc = proc.guitar();
+    const int key = svc.uiKey.load() % 12;
+    for (int i = 0; i < chordSlotBtns.size(); ++i)
+        chordSlotBtns[i]->setButtonText(GuitarService::chordName(key, svc.chordRoot(i), svc.chordQuality(i)));
+    for (int i = 0; i < soloSlotBtns.size(); ++i)
+        soloSlotBtns[i]->setButtonText(GuitarService::noteName(svc.soloNote(i)));
+}
+
+// Chords for a fret: the key's own chords first (the "can't miss" set), then
+// its sevenths, the common outside-the-key chords, and every chord by root.
+void GHMidiEditor::showChordMenu(int slot)
+{
+    auto& svc = proc.guitar();
+    const int key = svc.uiKey.load() % 12;
+    const int curR = svc.chordRoot(slot), curQ = svc.chordQuality(slot);
+    auto item = [&](juce::PopupMenu& menu, int root, int q)
+    {
+        menu.addItem(1 + root * 100 + q, GuitarService::chordName(key, root, q), true, root == curR && q == curQ);
+    };
+    static const int dRoot[7] = { 0, 2, 4, 5, 7, 9, 11 };
+    static const int dTri[7]  = { 0, 1, 1, 0, 0, 1, 5 };    // I ii iii IV V vi vii°
+    static const int dSev[7]  = { 3, 4, 4, 3, 2, 4, 6 };    // maj7 m7 m7 maj7 7 m7 m7b5
+    static const int oRoot[6] = { 10, 8, 3, 5, 4, 2 };      // bVII bVI bIII iv III II
+    static const int oQ[6]    = { 0, 0, 0, 1, 0, 0 };
+    juce::PopupMenu m;
+    m.addSectionHeader(juce::String("IN THE KEY OF ") + keyNames[key]);
+    for (int i = 0; i < 7; ++i) item(m, dRoot[i], dTri[i]);
+    m.addSectionHeader("SEVENTHS");
+    for (int i = 0; i < 7; ++i) item(m, dRoot[i], dSev[i]);
+    m.addSectionHeader("OUTSIDE THE KEY");
+    for (int i = 0; i < 6; ++i) item(m, oRoot[i], oQ[i]);
+    juce::PopupMenu any;
+    for (int r = 0; r < 12; ++r)
+    {
+        juce::PopupMenu sub;
+        for (int q = 0; q < GuitarService::numQualities(); ++q)
+            item(sub, r, q);
+        any.addSubMenu(keyNames[(key + r) % 12], sub, true, nullptr, r == curR);
+    }
+    m.addSeparator();
+    m.addSubMenu("ANY CHORD", any);
+    m.addItem(9999, "Default (" + GuitarService::chordName(key, GuitarService::defaultChordRoot(slot),
+                                                           GuitarService::defaultChordQuality(slot)) + ")");
+    juce::Component::SafePointer<GHMidiEditor> safe(this);
+    m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(chordSlotBtns[slot]),
+                    [safe, slot](int r)
+                    {
+                        if (safe == nullptr || r <= 0)
+                            return;
+                        auto& g = safe->proc.guitar();
+                        if (r == 9999)
+                            g.setChordSlot(slot, GuitarService::defaultChordRoot(slot), GuitarService::defaultChordQuality(slot));
+                        else
+                            g.setChordSlot(slot, (r - 1) / 100, (r - 1) % 100);
+                        safe->refreshFretButtons();
+                    });
+}
+
+// Notes for a SOLO fret, named as they sound at the current key and range:
+// the key's scale over three octaves, everything else in a submenu.
+void GHMidiEditor::showSoloMenu(int slot)
+{
+    auto& svc = proc.guitar();
+    const int key = svc.uiKey.load() % 12;
+    const int curOff = svc.soloOffset(slot);
+    static const bool inKey[12] = { true, false, true, false, true, true, false, true, false, true, false, true };
+    std::set<int> seen;
+    auto addNote = [&](juce::PopupMenu& menu, int off)
+    {
+        const int n = svc.soloNoteWith(slot, off);
+        if (! seen.insert(n).second)
+            return;   // two choices that sound the same at this range: list it once
+        menu.addItem(1100 + off, GuitarService::noteName(n), true, off == curOff);
+    };
+    juce::PopupMenu m;
+    const char* bands[3] = { "LOW", "MIDDLE", "HIGH" };
+    for (int b = 0; b < 3; ++b)
+    {
+        m.addSectionHeader(juce::String(b == 0 ? juce::String("IN THE KEY OF ") + keyNames[key] + "  -  " : juce::String())
+                           + bands[b]);
+        for (int off = -12 + 12 * b; off < 12 * b; ++off)
+            if (inKey[((off % 12) + 12) % 12])
+                addNote(m, off);
+        if (b == 2)
+            addNote(m, 24);
+    }
+    juce::PopupMenu other;
+    for (int off = -12; off < 24; ++off)
+        if (! inKey[((off % 12) + 12) % 12])
+            addNote(other, off);
+    m.addSeparator();
+    m.addSubMenu("OTHER NOTES", other);
+    m.addItem(9999, "Default (" + GuitarService::noteName(svc.soloNoteWith(slot, GuitarService::defaultSoloOffset(slot))) + ")");
+    juce::Component::SafePointer<GHMidiEditor> safe(this);
+    m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(soloSlotBtns[slot]),
+                    [safe, slot](int r)
+                    {
+                        if (safe == nullptr || r <= 0)
+                            return;
+                        auto& g = safe->proc.guitar();
+                        g.setSoloSlot(slot, r == 9999 ? GuitarService::defaultSoloOffset(slot) : r - 1100);
+                        safe->refreshFretButtons();
+                    });
+}
+
 void GHMidiEditor::updateHudButtons()
 {
-    const bool show = ! panelOpen && ! helpOpen;
+    const bool show = ! panelOpen && ! helpOpen && ! fretsOpen;
     for (auto* c : std::initializer_list<juce::Component*> {
              &modePrev, &modeNext, &strumPrev, &strumNext, &keyPrev, &keyNext, &octPrev, &octNext })
         c->setVisible(show);
@@ -285,8 +519,17 @@ void GHMidiEditor::updateHudButtons()
     const int oct = mode == 0 ? proc.guitar().uiEasyOct.load() : proc.guitar().uiOctave.load();
     keyPrev.setEnabled(! chart);
     keyNext.setEnabled(! chart);
-    octPrev.setEnabled(! chart && oct > GuitarService::kOctaveMin);
-    octNext.setEnabled(! chart && oct < GuitarService::kOctaveMax);
+    if (mode == GuitarService::Penta)   // SOLO: RANGE, in scale steps
+    {
+        const int st = proc.guitar().uiSoloStep.load();
+        octPrev.setEnabled(st > GuitarService::kSoloStepMin);
+        octNext.setEnabled(st < GuitarService::kSoloStepMax);
+    }
+    else
+    {
+        octPrev.setEnabled(! chart && oct > GuitarService::kOctaveMin);
+        octNext.setEnabled(! chart && oct < GuitarService::kOctaveMax);
+    }
     const int ms = proc.guitar().strumRollMs.load();
     strumPrev.setEnabled(! chart && ms > 0);
     strumNext.setEnabled(! chart && ms < GuitarService::kStrumMaxMs);
@@ -344,29 +587,38 @@ void GHMidiEditor::timerCallback()
         auto& svc = proc.guitar();
         switch (++hudSnapTick)
         {
-            case 1:   juce::Logger::writeToLog("hud: window showing, tour started"); break;
+            case 1:   juce::Logger::writeToLog("hud: window showing, tour started");
+                      svc.uiKey = 0; svc.strumRollMs = 10;   // match the demo's C-major chord names
+                      break;
             case 45:  saveHudSnapshot("chords"); break;
             case 50:  svc.uiMode = 1; svc.uiKey = 7; svc.uiOctave = 12; break;
             case 60:  saveHudSnapshot("notes"); break;
-            case 65:  svc.uiMode = 2; svc.uiOctave = 36;
+            case 65:  svc.uiMode = 2; svc.uiSoloStep = 2;
                       svc.uiButtonBits = (1 << GuitarService::LMinus) | (1 << GuitarService::LStickY)
                                        | (1 << GuitarService::LPlus);
                       break;
-            case 75:  saveHudSnapshot("solo_maxoct"); break;
+            case 75:  saveHudSnapshot("solo_range"); break;
             case 77:  svc.uiMode = 3; svc.uiButtonBits = 0; svc.announceFrets(0x03); break;
             case 79:  saveHudSnapshot("chart"); break;
-            case 82:  setHelpVisible(true); break;
-            case 90:  saveHudSnapshot("help"); break;
-            case 95:  setHelpVisible(false); setPanelVisible(true); break;
-            case 105: saveHudSnapshot("settings"); break;
-            case 135: juce::Logger::writeToLog("hud: tour done, quitting"); juce::JUCEApplicationBase::quit(); break;
+            case 80:  svc.uiMode = 0; svc.uiKey = 7; svc.uiFretBits = 0x06; setFretsVisible(true); break;
+            case 88:  saveHudSnapshot("frets_chords"); break;
+            case 90:  svc.uiMode = 2; svc.uiSoloStep = 0; svc.uiFretBits = 0x04; setFretsTab(1); break;
+            case 96:  saveHudSnapshot("frets_solo"); break;
+            case 98:  svc.uiFretBits = 0; setFretsVisible(false); setHelpVisible(true); break;
+            case 106: saveHudSnapshot("help"); break;
+            case 108: setHelpVisible(false); setPanelVisible(true); break;
+            case 118: saveHudSnapshot("settings"); break;
+            case 140: juce::Logger::writeToLog("hud: tour done, quitting"); juce::JUCEApplicationBase::quit(); break;
             default: break;
         }
     }
     updateHudButtons();
+    if (fretsOpen)
+        refreshFretButtons();   // key / range changes rename every row
     if (panelOpen)
     {
         auto& svc = proc.guitar();
+        syncSettingsButtons();
         if (svc.getDeviceListVersion() != lastDevVersion)
         {
             lastDevVersion = svc.getDeviceListVersion();
@@ -393,7 +645,7 @@ void GHMidiEditor::timerCallback()
             for (int t = 0; t < rowLearn.size(); ++t)
                 rowLearn[t]->setButtonText(t == lt ? "..." : "LEARN");
             learnHint.setText(lt < 0 ? juce::String()
-                                     : (lt >= GuitarService::LWhammy
+                                     : (lt >= GuitarService::LWhammy && lt <= GuitarService::LStickY
                                             ? "Now SWEEP the " + GuitarService::targetName(lt)
                                             : "Now PRESS the " + GuitarService::targetName(lt)),
                               juce::dontSendNotification);
@@ -407,6 +659,26 @@ void GHMidiEditor::resized()
     highway.setViewSize(getWidth(), getHeight());
     gearBtn.setBounds(getWidth() - 104, 16, 92, 28);
     helpBtn.setBounds(getWidth() - 140, 16, 30, 28);
+    fretsBtn.setBounds(getWidth() - 200, 16, 54, 28);
+
+    // FRETS editor
+    {
+        const auto fb = fretsBounds(getWidth(), getHeight());
+        fretsCloseBtn.setBounds(fb.getRight() - 40, fb.getY() + 12, 28, 26);
+        fretsTabSolo.setBounds(fb.getRight() - 48 - 76, fb.getY() + 12, 76, 26);
+        fretsTabChords.setBounds(fb.getRight() - 48 - 152, fb.getY() + 12, 76, 26);
+        fretsResetBtn.setBounds(fb.getX() + 30, fb.getBottom() - 48, 150, 26);
+        for (int i = 0; i < chordSlotBtns.size(); ++i)
+        {
+            const auto p = chordRowPos(i, fb);
+            chordSlotBtns[i]->setBounds(p.x + 68, p.y - 4, 150, 23);
+        }
+        for (int i = 0; i < soloSlotBtns.size(); ++i)
+        {
+            const auto p = soloRowPos(i, fb);
+            soloSlotBtns[i]->setBounds(p.x + 68, p.y - 4, 110, 23);
+        }
+    }
     // SUSTAIN  [FRET][STRUM]  -- flush right with SETTINGS, one row below it
     sustainStrumBtn.setBounds(getWidth() - 104 + 46, 50, 46, 22);
     sustainFretBtn.setBounds(getWidth() - 104, 50, 46, 22);
@@ -432,13 +704,13 @@ void GHMidiEditor::resized()
     const auto pb = panelBounds(getWidth(), getHeight());
     closeBtn.setBounds(pb.getRight() - 40, pb.getY() + 12, 28, 26);
     auto r = pb.reduced(20);
-    r.removeFromTop(34);  // painted title
+    r.removeFromTop(30);  // painted title
     auto devRow = r.removeFromTop(24);
     deviceLabel.setBounds(devRow.removeFromLeft(76));
     rescanBtn.setBounds(devRow.removeFromRight(72));
     devRow.removeFromRight(6);
     deviceBox.setBounds(devRow);
-    r.removeFromTop(10);
+    r.removeFromTop(8);
     learnHint.setBounds(r.removeFromTop(18));
     r.removeFromTop(4);
     for (int t = 0; t < rowNames.size(); ++t)
@@ -449,9 +721,18 @@ void GHMidiEditor::resized()
         row.removeFromRight(4);
         rowLearn[t]->setBounds(row.removeFromRight(62).reduced(0, 1));
         rowDescs[t]->setBounds(row);
-        r.removeFromTop(2);
+        r.removeFromTop(1);
     }
     r.removeFromTop(8);
+    {
+        auto optRow = r.removeFromTop(24);
+        leftyToggle.setBounds(optRow.removeFromLeft(130));
+        whamPalmBtn.setBounds(optRow.removeFromRight(96));
+        whamBendBtn.setBounds(optRow.removeFromRight(64));
+        optRow.removeFromRight(8);
+        whammyLabel.setBounds(optRow);
+    }
+    r.removeFromTop(6);
     auto outRow = r.removeFromTop(24);
     vmidiToggle.setBounds(outRow);              // macOS / Linux
     midiOutLabel.setBounds(outRow.removeFromLeft(76));   // Windows
@@ -529,6 +810,7 @@ void GHMidiEditor::paint(juce::Graphics& g)
         const int mode = proc.guitar().uiMode.load() % 4;
         const int uiK = proc.guitar().uiKey.load() % 12;
         const bool notes = mode == 1;
+        const bool solo = mode == GuitarService::Penta;
         const bool chart = mode == GuitarService::Chart;
         const int octSemis = mode == 0 ? proc.guitar().uiEasyOct.load() : proc.guitar().uiOctave.load();
         const int oct = octSemis / 12;
@@ -541,7 +823,9 @@ void GHMidiEditor::paint(juce::Graphics& g)
             const int base = 40 + uiK + proc.guitar().uiOctave.load();
             vals[2] = juce::String(keyNames[base % 12]) + juce::String(base / 12 - 1);
         }
-        const char* labels[4] = { "MODE", "STRUM SPREAD", notes ? "BASE" : "KEY", "OCTAVE" };
+        if (solo)   // SOLO: RANGE = the note on the green fret, slid along the scale
+            vals[3] = GuitarService::noteName(proc.guitar().soloNote(0));
+        const char* labels[4] = { "MODE", "STRUM SPREAD", notes ? "BASE" : "KEY", solo ? "RANGE" : "OCTAVE" };
         // the guitar control for each column, mirrored on the on-screen arrows
         const juce::String guitarCtl[4] = { "MINUS", "PLUS",
                                             "JOYSTICK " + arrowL + " " + arrowR,
@@ -573,7 +857,7 @@ void GHMidiEditor::paint(juce::Graphics& g)
     // status banner
     const bool found = proc.guitar().guitarFound.load();
     const bool empty = proc.guitar().adapterEmpty.load();
-    if ((! found || empty) && ! panelOpen && ! helpOpen)
+    if ((! found || empty) && ! panelOpen && ! helpOpen && ! fretsOpen)
     {
         g.setColour(juce::Colour(0xd0e23b3b));
         g.fillRoundedRectangle(24.0f, H * 0.46f, W - 48.0f, 28.0f, 6.0f);
@@ -598,7 +882,7 @@ void GHMidiEditor::paint(juce::Graphics& g)
                    (int) pb.getWidth() - 40, 26, juce::Justification::left);
         g.setColour(juce::Colours::white.withAlpha(0.35f));
         g.setFont(juce::Font(juce::FontOptions(11.0f)));
-        g.drawText("v1.1", (int) pb.getX() + 20, (int) pb.getBottom() - 30,
+        g.drawText(kVersion, (int) pb.getX() + 20, (int) pb.getBottom() - 30,
                    (int) pb.getWidth() - 40, 16, juce::Justification::right);
     };
 
@@ -631,17 +915,107 @@ void GHMidiEditor::paint(juce::Graphics& g)
         };
         section("CONTROLS");
         line("FRETS + STRUM", "play - up and down strums feel different");
-        line("WHAMMY", "bend the note");
+        line("WHAMMY", "bend the note (or palm mute: SETTINGS)");
         line("MINUS", "switch mode");
         line("PLUS", "tap through strum speeds (0-50ms)");
-        line("JOYSTICK", "left/right = key - up/down = octave");
+        line("JOYSTICK", "left/right = key - up/down = octave (SOLO: range)");
         line("ON SCREEN", "the bottom arrows do all of the above too");
+        line("FRETS", "change what any fret plays");
         rowY += 8;
         section("MODES");
         line("CHORDS", "every fret is a chord in your key. can't miss", 70);
         line("SOLO", "5 scale notes, strum any stack. can't miss", 70);
         line("NOTES", "fret combos pick all 32 notes. full control", 70);
         line("CHART", "frets = Clone Hero lanes. record a rough chart", 70);
+    }
+    else if (fretsOpen)
+    {
+        const auto fb = fretsBounds(getWidth(), getHeight());
+        drawOverlayFrame(fb.toFloat(), "FRETS");
+        auto& svc = proc.guitar();
+        const int key = svc.uiKey.load() % 12;
+        const int held = svc.uiFretBits.load();
+        g.setColour(juce::Colours::white.withAlpha(0.45f));
+        g.setFont(juce::Font(juce::FontOptions(11.0f)));
+        g.drawText(juce::String("key of ") + keyNames[key]
+                       + (fretsTab == 0 ? "  -  click a chord to change it, press frets to find the row"
+                                        : "  -  click a note to change it, press frets to find the row"),
+                   fb.getX() + 20, fb.getY() + 44, fb.getWidth() - 40, 14, juce::Justification::left);
+
+        auto tabs = [&](int x, int y, int mask)
+        {
+            for (int i = 0; i < 5; ++i)
+            {
+                juce::Path p;
+                p.addRoundedRectangle((float) (x + i * 12), (float) y, 9.0f, 15.0f, 2.5f, 2.5f, false, false, true, true);
+                g.setColour((mask & (1 << i)) ? gemColours[i] : juce::Colour(0xff2b2b36));
+                g.fillPath(p);
+            }
+        };
+        auto hilite = [&](juce::Point<int> p, int w)
+        {
+            g.setColour(gold.withAlpha(0.20f));
+            g.fillRoundedRectangle((float) p.x - 6.0f, (float) p.y - 6.0f, (float) w, 27.0f, 4.0f);
+        };
+        auto header = [&](int x, int y, const juce::String& s)
+        {
+            g.setColour(juce::Colours::white.withAlpha(0.38f));
+            g.setFont(juce::Font(juce::FontOptions(9.0f, juce::Font::bold)));
+            g.drawText(s, x, y, 220, 10, juce::Justification::left);
+        };
+        auto note = [&](int x, int y, int w, const juce::String& s)
+        {
+            g.setColour(juce::Colours::white.withAlpha(0.4f));
+            g.setFont(juce::Font(juce::FontOptions(11.0f)));
+            g.drawFittedText(s, x, y, w, 30, juce::Justification::topLeft, 2);
+        };
+        const int top = fretsTop(fb);
+        if (fretsTab == 0)
+        {
+            // the row the held frets would play: their shape, or (3+ frets) the top fret
+            int hi = -1;
+            for (int sl = 0; sl < GuitarService::kChordSlots && held != 0; ++sl)
+                if (GuitarService::chordSlotMask(sl) == held) hi = sl;
+            if (hi < 0 && held != 0)
+                for (int i = 4; i >= 0 && hi < 0; --i)
+                    if (held & (1 << i)) hi = i;
+            header(fb.getX() + 30, top, "ONE FRET");
+            header(fb.getX() + 276, top, "TWO FRETS");
+            for (int sl = 0; sl < GuitarService::kChordSlots; ++sl)
+            {
+                const auto p = chordRowPos(sl, fb);
+                if (sl == hi)
+                    hilite(p, 232);
+                tabs(p.x, p.y, GuitarService::chordSlotMask(sl));
+            }
+            note(fb.getX() + 30, chordRowPos(4, fb).y + 40, 220,
+                 "3+ fret shapes play their highest fret's chord. Open strum = the key's low root.");
+        }
+        else
+        {
+            header(fb.getX() + 30, top, "FRET");
+            header(fb.getX() + 98, top, "NOTE");
+            header(fb.getX() + 222, top, "SCALE STEP");
+            for (int sl = 0; sl < GuitarService::kSoloSlots; ++sl)
+            {
+                const auto p = soloRowPos(sl, fb);
+                if ((sl < 5 && (held & (1 << sl)) != 0))
+                    hilite(p, 290);
+                if (sl < 5)
+                    tabs(p.x, p.y, 1 << sl);
+                else
+                {
+                    g.setColour(juce::Colours::white.withAlpha(0.6f));
+                    g.setFont(juce::Font(juce::FontOptions(10.0f, juce::Font::bold)));
+                    g.drawText("OPEN", p.x, p.y, 56, 15, juce::Justification::centredLeft);
+                }
+                g.setColour(juce::Colours::white.withAlpha(0.6f));
+                g.setFont(juce::Font(juce::FontOptions(12.0f)));
+                g.drawText(degreeName(svc.soloNote(sl), key), p.x + 192, p.y - 2, 90, 18, juce::Justification::left);
+            }
+            note(fb.getX() + 30, soloRowPos(5, fb).y + 36, fb.getWidth() - 60,
+                 "RANGE (joystick " + arrowU + arrowD + " or the bottom arrows) slides every fret along the scale.");
+        }
     }
 
 }

@@ -1,4 +1,4 @@
-GH MIDI v1.1
+GH MIDI v1.2
 ============
 Play a Guitar Hero controller like a real instrument.
 
@@ -38,6 +38,13 @@ SETUP
   If the plugin still won't load in your DAW, open Terminal and paste:
 
       xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST3/"GH MIDI.vst3"
+
+
+NEW IN 1.2
+
+  FRETS button: change what any fret plays (menus show your key first).
+  Lower input lag. Lefty flip and whammy palm mute in SETTINGS.
+  SOLO: joystick up/down slides the five frets along the scale.
 
 
 HELP

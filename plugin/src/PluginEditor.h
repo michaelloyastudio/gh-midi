@@ -16,6 +16,12 @@ private:
     void timerCallback() override;
     void setPanelVisible(bool visible);
     void setHelpVisible(bool visible);
+    void setFretsVisible(bool visible);
+    void setFretsTab(int tab);
+    void refreshFretButtons();
+    void showChordMenu(int slot);
+    void showSoloMenu(int slot);
+    void syncSettingsButtons();
     void updateHudButtons();
     void refreshDeviceBox();
     void refreshMappingRows();
@@ -24,9 +30,16 @@ private:
     HighwayRenderer highway;
     juce::OpenGLContext context;
 
-    bool panelOpen = false, helpOpen = false;
+    bool panelOpen = false, helpOpen = false, fretsOpen = false;
 
-    juce::TextButton gearBtn { "SETTINGS" }, helpBtn { "?" };
+    juce::TextButton gearBtn { "SETTINGS" }, helpBtn { "?" }, fretsBtn { "FRETS" };
+
+    // FRETS editor: click what a fret plays to change it (CHORDS / SOLO tabs)
+    int fretsTab = 0;   // 0 = CHORDS, 1 = SOLO
+    juce::TextButton fretsTabChords { "CHORDS" }, fretsTabSolo { "SOLO" };
+    juce::TextButton fretsResetBtn { "RESET TO DEFAULT" }, fretsCloseBtn { "X" };
+    juce::OwnedArray<juce::TextButton> chordSlotBtns, soloSlotBtns;
+    int fretsShownKey = -1, fretsShownStep = -999;
 
     // which control decides how long a note lasts: the fret (default) or the
     // strum bar. Lives on the main view under ? / SETTINGS, not in the panel.
@@ -42,6 +55,9 @@ private:
     juce::ComboBox deviceBox;
     juce::TextButton rescanBtn { "RESCAN" }, closeBtn { "X" };
     juce::ToggleButton vmidiToggle { "Virtual MIDI output (record notes in your DAW)" };
+    juce::ToggleButton leftyToggle { "Lefty flip" };
+    juce::Label whammyLabel;
+    juce::TextButton whamBendBtn { "BEND" }, whamPalmBtn { "PALM MUTE" };
     // Windows only (no virtual MIDI ports there): pick a real port instead
     juce::Label midiOutLabel;
     juce::ComboBox midiOutBox;

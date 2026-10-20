@@ -1,9 +1,9 @@
-GH MIDI v1.1 - Windows
+GH MIDI v1.2 - Windows
 ======================
 Play a Guitar Hero controller like a real instrument.
 
-This is the first Windows build. It was built on GitHub's Windows machines
-and has not been played on a real Windows PC yet. If something is off, tell
+The Windows build is made on GitHub's Windows machines and has not been
+played on a real Windows PC yet. If something is off, tell
 me: hello@michaelloya.studio, or github.com/michaelloyastudio/gh-midi/issues
 
 
@@ -39,6 +39,14 @@ SETUP
   Xbox 360 guitars are not supported yet (they are XInput, not USB HID).
   Wii guitars through a USB adapter and PlayStation guitars show up as HID
   and should work. Not recognised? SETTINGS > pick it > LEARN each control.
+
+
+NEW IN 1.2
+
+  FRETS button: change what any fret plays (menus show your key first).
+  Lower input lag (the guitar is read every millisecond; Windows timers no
+  longer round every wait up to 15 ms). Lefty flip and whammy palm mute in
+  SETTINGS. SOLO: joystick up/down slides the five frets along the scale.
 
 
 HELP
