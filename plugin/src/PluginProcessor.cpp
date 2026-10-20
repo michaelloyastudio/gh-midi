@@ -948,6 +948,8 @@ void GuitarService::run()
             wait(1);
     }
     allOff();
+    if (saveRequest.exchange(false))
+        saveSettings();   // a change made just before quitting still lands
     virtualOut.reset();
     portOut.reset();
     if (dev != nullptr)

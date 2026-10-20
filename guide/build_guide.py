@@ -257,7 +257,7 @@ def p_screen():
     return h2("05", "The screen") + f"""
 <div class="shotwrap mid"><img class="shot" src="assets/ui-chords.jpg" alt="">{dots}</div>
 <table class="legend">
-<tr><td><span class="cn">1</span></td><td><b>FRETS, ? and SETTINGS</b> — change what each fret plays, a quick controls reminder, and the settings panel.</td></tr>
+<tr><td><span class="cn">1</span></td><td><b>FRETS and SETTINGS</b> — change what each fret plays, and the settings panel. The <b>?</b> by the logo is a quick controls reminder.</td></tr>
 <tr><td><span class="cn">2</span></td><td><b>What you played</b> — the chord or note name, and every setting change.</td></tr>
 <tr><td><span class="cn">3</span></td><td><b>The highway</b> — your notes travel away as gems. Held notes trail; the whammy wiggles them.</td></tr>
 <tr><td><span class="cn">4</span></td><td><b>MODE</b> — CHORDS, NOTES, SOLO or CHART. Arrows or minus.</td></tr>
@@ -430,7 +430,7 @@ def p_custom():
 <p>Press <b>FRETS</b> at the top of the screen. Every fret shape is listed with what it plays now. Click one and pick something else.</p>
 <p><b>CHORDS</b> tab: the five single frets and all ten two-fret pairs. The menu starts with the chords of your key, then their sevenths, then common chords from outside the key. <b>ANY CHORD</b> has every chord on every root.</p>
 <p><b>SOLO</b> tab: the five frets and the open strum. The menu lists the notes of your key, low to high. <b>OTHER NOTES</b> has the rest.</p>
-<p><b>KEY</b> arrows change the key you're binding (and playing). <b>ALL KEYS</b>: your picks follow every key. <b>THIS KEY ONLY</b>: this key gets its own set; switching back to ALL KEYS drops it.</p>
+<p><b>KEY</b> arrows change the key you're binding (and playing). <b>CHANGES AFFECT: ALL KEYS</b>: your picks follow every key. <b>THIS KEY ONLY</b>: this key gets its own set; switching back to ALL KEYS drops it. Everything is saved as you go.</p>
 <p>Press frets on the guitar and their row lights up. <b>RESET TO DEFAULT</b> puts the tab back.</p>
 </div>
 <div>

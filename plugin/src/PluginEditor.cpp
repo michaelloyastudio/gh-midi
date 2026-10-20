@@ -44,9 +44,9 @@ juce::Rectangle<int> helpBounds(int W, int H)
 // Each row: five gem tabs, then the clickable chord/note button.
 juce::Rectangle<int> fretsBounds(int W, int H)
 {
-    return { W / 2 - 260, H / 2 - 220, 520, 440 };
+    return { W / 2 - 260, H / 2 - 230, 520, 460 };
 }
-int fretsTop(juce::Rectangle<int> fb) { return fb.getY() + 96; }
+int fretsTop(juce::Rectangle<int> fb) { return fb.getY() + 104; }
 juce::Point<int> chordRowPos(int slot, juce::Rectangle<int> fb)
 {
     if (slot < 5)
@@ -697,8 +697,9 @@ void GHMidiEditor::resized()
 {
     highway.setViewSize(getWidth(), getHeight());
     gearBtn.setBounds(getWidth() - 104, 16, 92, 28);
-    helpBtn.setBounds(getWidth() - 140, 16, 30, 28);
-    fretsBtn.setBounds(getWidth() - 200, 16, 54, 28);
+    // ? sits by the wordmark; FRETS and SETTINGS stay together top-right
+    helpBtn.setBounds(150, 17, 28, 26);
+    fretsBtn.setBounds(getWidth() - 104 - 6 - 58, 16, 58, 28);
 
     // FRETS editor
     {
@@ -707,7 +708,7 @@ void GHMidiEditor::resized()
         fretsTabSolo.setBounds(fb.getRight() - 48 - 76, fb.getY() + 12, 76, 26);
         fretsTabChords.setBounds(fb.getRight() - 48 - 152, fb.getY() + 12, 76, 26);
         fretsResetBtn.setBounds(fb.getX() + 30, fb.getBottom() - 48, 150, 26);
-        const int ky = fb.getY() + 52;
+        const int ky = fb.getY() + 60;
         fretsKeyPrev.setBounds(fb.getX() + 64, ky + 1, 24, 22);   // same size as the plate arrows
         fretsKeyNext.setBounds(fb.getX() + 64 + 24 + 52, ky + 1, 24, 22);
         thisKeyBtn.setBounds(fb.getRight() - 30 - 112, ky, 112, 24);
@@ -983,10 +984,16 @@ void GHMidiEditor::paint(juce::Graphics& g)
         // KEY  < G >   -- the key these binds are for (the playing key)
         g.setColour(juce::Colours::white.withAlpha(0.38f));
         g.setFont(juce::Font(juce::FontOptions(9.0f, juce::Font::bold)));
-        g.drawText("KEY", fb.getX() + 30, fb.getY() + 52, 30, 24, juce::Justification::centredLeft);
+        g.drawText("KEY", fb.getX() + 30, fb.getY() + 60, 30, 24, juce::Justification::centredLeft);
+        g.drawText("CHANGES AFFECT", fb.getRight() - 30 - 196 - 104, fb.getY() + 60, 96, 24,
+                   juce::Justification::centredRight);
         g.setColour(juce::Colours::white.withAlpha(0.9f));
         g.setFont(ghFont(18.0f));
-        g.drawText(keyNames[key], fb.getX() + 88, fb.getY() + 52, 52, 24, juce::Justification::centred);
+        g.drawText(keyNames[key], fb.getX() + 88, fb.getY() + 60, 52, 24, juce::Justification::centred);
+        // a hairline between the tab row and the key row, so the two toggle
+        // pairs don't read as one stack
+        g.setColour(juce::Colours::white.withAlpha(0.10f));
+        g.fillRect(fb.getX() + 20, fb.getY() + 48, fb.getWidth() - 40, 1);
         auto tabs = [&](int x, int y, int mask)
         {
             for (int i = 0; i < 5; ++i)
