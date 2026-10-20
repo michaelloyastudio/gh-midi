@@ -924,7 +924,7 @@ void GuitarService::run()
         {
             ++shorts;
             adapterEmpty = polls > 1000 && shorts > polls - 200;
-            wait(4);   // nothing to read: no need to hammer the adapter
+            wait(1);
             continue;
         }
         adapterEmpty = false;
