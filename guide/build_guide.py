@@ -430,8 +430,8 @@ def p_custom():
 <p>Press <b>FRETS</b> at the top of the screen. Every fret shape is listed with what it plays now. Click one and pick something else.</p>
 <p><b>CHORDS</b> tab: the five single frets and all ten two-fret pairs. The menu starts with the chords of your key, then their sevenths, then common chords from outside the key. <b>ANY CHORD</b> has every chord on every root.</p>
 <p><b>SOLO</b> tab: the five frets and the open strum. The menu lists the notes of your key, low to high. <b>OTHER NOTES</b> has the rest.</p>
+<p><b>KEY</b> arrows change the key you're binding (and playing). <b>ALL KEYS</b>: your picks follow every key. <b>THIS KEY ONLY</b>: this key gets its own set; switching back to ALL KEYS drops it.</p>
 <p>Press frets on the guitar and their row lights up. <b>RESET TO DEFAULT</b> puts the tab back.</p>
-<p class="muted">Your picks follow the key. Change key and they move with it.</p>
 </div>
 <div>
 <img class="shot" src="assets/ui-frets.jpg" alt="">
@@ -439,7 +439,6 @@ def p_custom():
 </div>
 <h3>Palm mute</h3>
 <p>On a real guitar you rest your palm on the strings by the bridge. Notes come out short, quiet and chunky (the chug in metal and pop-punk). In <b>SETTINGS → Whammy → PALM MUTE</b> the whammy does it: hold it down and strum. Notes are choked after a moment, played softer, and chords become low power chords. Let go of the whammy to ring out normally. The whammy stops bending in this mode.</p>
-<p class="muted">A controller with a spare button can palm mute with that instead: LEARN it on the PALM MUTE row (section 12).</p>
 <h3>Lefty flip</h3>
 <p><b>SETTINGS → Lefty flip.</b> The highway mirrors (green on the right), and the strum bar and joystick are reversed to match a guitar played upside down.</p>"""
 
@@ -453,11 +452,13 @@ def p_settings():
 <h3>Controller</h3>
 <p>Which USB device GH MIDI listens to. RESCAN after plugging something in. Each controller keeps its own mapping.</p>
 <h3>Mapping table</h3>
-<p>One row per control. Press <b>LEARN</b> on a row, then press (or sweep) that control on the guitar. <b>X</b> clears a row. Rows light up as you touch controls. <b>PALM MUTE</b> starts empty: map a spare button to it if you have one.</p>
+<p>One row per control. Press <b>LEARN</b> on a row, then press (or sweep) that control on the guitar. <b>X</b> clears a row. Rows light up as you touch controls.</p>
 <h3>Lefty flip, Whammy</h3>
 <p>Section 11.</p>
-<h3>Virtual MIDI output</h3>
-<p>The system-wide <b>GH MIDI</b> input. Leave it on.</p>
+<h3>Reset to defaults</h3>
+<p>Puts this controller's mapping, lefty flip and the whammy mode back. Your FRETS picks are kept.</p>
+<h3>"GH MIDI" input (plugin only)</h3>
+<p>The plugin sends notes down its own track <i>and</i> to the system-wide <b>GH MIDI</b> input. If your DAW listens to both, every note plays twice: turn this off. The app always sends to GH MIDI; it's the app's only output.</p>
 </div>
 </div>
 <h3>Other guitars and gamepads</h3>

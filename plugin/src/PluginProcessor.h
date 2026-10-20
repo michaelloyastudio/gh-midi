@@ -76,7 +76,7 @@ public:
     };
     struct ControllerMap
     {
-        ButtonMap frets[5], strumDown, strumUp, plusBtn, minusBtn, palmBtn;
+        ButtonMap frets[5], strumDown, strumUp, plusBtn, minusBtn;
         AxisMap whammy;
         StickMap stickX, stickY;
     };
@@ -132,10 +132,16 @@ public:
     static int defaultChordQuality(int slot);
     static int defaultSoloOffset(int slot);
     static int soloShift(int offset, int steps);    // slide a note along the key's scale
-    int chordRoot(int slot) const    { return chordRootA[slot].load(); }
-    int chordQuality(int slot) const { return chordQualA[slot].load(); }
-    int soloOffset(int slot) const   { return soloOffA[slot].load(); }
-    int soloNote(int slot) const { return soloNoteWith(slot, soloOffA[juce::jlimit(0, kSoloSlots - 1, slot)].load()); }
+    // Binds are shared by every key, unless a key has its own set ("this key
+    // only"). Everything below reads/writes the set for the CURRENT key.
+    static constexpr int kSharedSet = 12;
+    int bindSet() const { const int k = uiKey.load() % 12; return keyOwn[k].load() ? k : kSharedSet; }
+    bool keyHasOwnBinds(int key) const { return keyOwn[((key % 12) + 12) % 12].load(); }
+    void setKeyOwnBinds(int key, bool own);   // on: copy the shared set to this key; off: back to shared
+    int chordRoot(int slot) const    { return chordRootA[bindSet()][slot].load(); }
+    int chordQuality(int slot) const { return chordQualA[bindSet()][slot].load(); }
+    int soloOffset(int slot) const   { return soloOffA[bindSet()][slot].load(); }
+    int soloNote(int slot) const { return soloNoteWith(slot, soloOffset(juce::jlimit(0, kSoloSlots - 1, slot))); }
     int soloNoteWith(int slot, int offset) const;   // what that fret would play with this note, at the current key + range
     void setChordSlot(int slot, int root, int quality);
     void setSoloSlot(int slot, int offset);
@@ -191,7 +197,7 @@ public:
     // per-control mapping: each row learned or cleared independently
     enum LearnTarget { LFretG = 0, LFretR, LFretY, LFretB, LFretO,
                        LStrumDown, LStrumUp, LPlus, LMinus, LWhammy, LStickX, LStickY,
-                       LPalm, LTargetCount };
+                       LTargetCount };
     void startLearn(int target) { learnTarget = juce::jlimit(0, LTargetCount - 1, target); learnPhase = 0; learnT0req = true; notify(); }
     void cancelLearn() { learnTarget = -1; }
     int getLearnTarget() const { return learnTarget.load(); }
@@ -201,6 +207,9 @@ public:
     static juce::String targetName(int target);
 
     void requestSave() { saveRequest = true; notify(); }
+    // SETTINGS -> RESET TO DEFAULTS: this controller's mapping, lefty, whammy, virtual MIDI
+    void requestSettingsReset() { settingsResetRequest = true; notify(); }
+    bool isStandalone() const { return standalone; }
 
     juce::String getLastPlayed() const
     {
@@ -272,7 +281,9 @@ private:
     mutable juce::CriticalSection deviceLock;
     juce::Array<DeviceInfo> devices;
     std::atomic<int> deviceListVersion { 0 };
-    std::atomic<bool> scanRequest { false }, reconnectRequest { false }, saveRequest { false };
+    std::atomic<bool> scanRequest { false }, reconnectRequest { false }, saveRequest { false },
+                      settingsResetRequest { false };
+    bool standalone = false;   // the app always publishes "GH MIDI": it's its only output
 
     // per-row learn engine
     std::atomic<int> learnTarget { -1 };
@@ -292,7 +303,9 @@ private:
     void setStrum(int ms);
     int mode = Easy;
     int key = 0, octaveReal = 0, easyOct = 0, soloStep = 0;
-    std::atomic<int> chordRootA[kChordSlots], chordQualA[kChordSlots], soloOffA[kSoloSlots];
+    std::atomic<int> chordRootA[13][kChordSlots], chordQualA[13][kChordSlots], soloOffA[13][kSoloSlots];
+    std::atomic<bool> keyOwn[12];
+    void fillDefaults(int set);
     struct Pending { double due; int note; int vel; };
     juce::Array<Pending> pending;    // scheduled note-ons (guitar thread only)
     double palmCutAt = -1.0;         // palm mute: when the ringing notes get choked

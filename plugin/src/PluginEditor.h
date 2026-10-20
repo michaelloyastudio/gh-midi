@@ -38,6 +38,8 @@ private:
     int fretsTab = 0;   // 0 = CHORDS, 1 = SOLO
     juce::TextButton fretsTabChords { "CHORDS" }, fretsTabSolo { "SOLO" };
     juce::TextButton fretsResetBtn { "RESET TO DEFAULT" }, fretsCloseBtn { "X" };
+    juce::TextButton fretsKeyPrev, fretsKeyNext;                        // the key being bound (= the playing key)
+    juce::TextButton allKeysBtn { "ALL KEYS" }, thisKeyBtn { "THIS KEY ONLY" };
     juce::OwnedArray<juce::TextButton> chordSlotBtns, soloSlotBtns;
     int fretsShownKey = -1, fretsShownStep = -999;
 
@@ -53,8 +55,8 @@ private:
     // settings panel
     juce::Label deviceLabel, learnHint;
     juce::ComboBox deviceBox;
-    juce::TextButton rescanBtn { "RESCAN" }, closeBtn { "X" };
-    juce::ToggleButton vmidiToggle { "Virtual MIDI output (record notes in your DAW)" };
+    juce::TextButton rescanBtn { "RESCAN" }, closeBtn { "X" }, settingsResetBtn { "RESET TO DEFAULTS" };
+    juce::ToggleButton vmidiToggle { "Also send to the \"GH MIDI\" input (turn off if notes double)" };
     juce::ToggleButton leftyToggle { "Lefty flip" };
     juce::Label whammyLabel;
     juce::TextButton whamBendBtn { "BEND" }, whamPalmBtn { "PALM MUTE" };

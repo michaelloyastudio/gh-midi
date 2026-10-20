@@ -29,14 +29,14 @@ power-chord chugs) if you pick that in SETTINGS. Minus cycles modes, plus taps
 through strum speeds, the joystick changes key (left/right) and octave
 (up/down, ±3 octaves; in SOLO it slides the range) — and on-screen arrows do
 all four for controllers without a joystick. Any HID controller can be mapped
-from the in-plugin settings (per-control LEARN, live input testing), including
-an optional palm-mute button. Lefty flip mirrors the highway and reverses the
+from the in-plugin settings (per-control LEARN, live input testing). Lefty flip mirrors the highway and reverses the
 strum bar and joystick.
 
 **FRETS** opens the fret editor: click any fret shape and pick what it plays.
 CHORDS menus list the key's chords first (then sevenths, borrowed chords and
-every chord on every root); SOLO menus list the key's notes. Choices are
-stored relative to the key, so they follow key changes.
+every chord on every root); SOLO menus list the key's notes. Binds apply to
+ALL KEYS (stored relative to the key, so they follow key changes) or, per key,
+THIS KEY ONLY.
 
 **Latency:** the guitar is polled about every millisecond, strums wait 4 ms
 for late fingers (was 10), rolled chords are scheduled instead of sleeping the

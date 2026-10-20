@@ -140,11 +140,42 @@ int GuitarService::soloNoteWith(int slot, int off) const
     return juce::jlimit(0, 127, n);
 }
 
+void GuitarService::fillDefaults(int set)
+{
+    for (int i = 0; i < kChordSlots; ++i)
+    {
+        chordRootA[set][i] = kChordDefaults[i].root;
+        chordQualA[set][i] = kChordDefaults[i].quality;
+    }
+    for (int i = 0; i < kSoloSlots; ++i)
+        soloOffA[set][i] = kSoloDefaults[i];
+}
+
+void GuitarService::setKeyOwnBinds(int key, bool own)
+{
+    const int k = ((key % 12) + 12) % 12;
+    if (own && ! keyOwn[k].load())
+    {
+        // start from what the key plays now: the shared set
+        for (int i = 0; i < kChordSlots; ++i)
+        {
+            chordRootA[k][i] = chordRootA[kSharedSet][i].load();
+            chordQualA[k][i] = chordQualA[kSharedSet][i].load();
+        }
+        for (int i = 0; i < kSoloSlots; ++i)
+            soloOffA[k][i] = soloOffA[kSharedSet][i].load();
+    }
+    keyOwn[k] = own;
+    saveRequest = true;
+    notify();
+}
+
 void GuitarService::setChordSlot(int slot, int root, int quality)
 {
     if (slot < 0 || slot >= kChordSlots) return;
-    chordRootA[slot] = ((root % 12) + 12) % 12;
-    chordQualA[slot] = juce::jlimit(0, kNumQualities - 1, quality);
+    const int set = bindSet();
+    chordRootA[set][slot] = ((root % 12) + 12) % 12;
+    chordQualA[set][slot] = juce::jlimit(0, kNumQualities - 1, quality);
     saveRequest = true;
     notify();
 }
@@ -152,17 +183,18 @@ void GuitarService::setChordSlot(int slot, int root, int quality)
 void GuitarService::setSoloSlot(int slot, int offset)
 {
     if (slot < 0 || slot >= kSoloSlots) return;
-    soloOffA[slot] = juce::jlimit(-24, 36, offset);
+    soloOffA[bindSet()][slot] = juce::jlimit(-24, 36, offset);
     saveRequest = true;
     notify();
 }
 
 void GuitarService::resetChordSlots()
 {
+    const int set = bindSet();
     for (int i = 0; i < kChordSlots; ++i)
     {
-        chordRootA[i] = kChordDefaults[i].root;
-        chordQualA[i] = kChordDefaults[i].quality;
+        chordRootA[set][i] = kChordDefaults[i].root;
+        chordQualA[set][i] = kChordDefaults[i].quality;
     }
     saveRequest = true;
     notify();
@@ -170,21 +202,20 @@ void GuitarService::resetChordSlots()
 
 void GuitarService::resetSoloSlots()
 {
+    const int set = bindSet();
     for (int i = 0; i < kSoloSlots; ++i)
-        soloOffA[i] = kSoloDefaults[i];
+        soloOffA[set][i] = kSoloDefaults[i];
     saveRequest = true;
     notify();
 }
 
 GuitarService::GuitarService() : juce::Thread("gh-guitar-poll")
 {
-    for (int i = 0; i < kChordSlots; ++i)
-    {
-        chordRootA[i] = kChordDefaults[i].root;
-        chordQualA[i] = kChordDefaults[i].quality;
-    }
-    for (int i = 0; i < kSoloSlots; ++i)
-        soloOffA[i] = kSoloDefaults[i];
+    for (int s = 0; s < 13; ++s)
+        fillDefaults(s);
+    for (auto& o : keyOwn)
+        o = false;
+    standalone = juce::JUCEApplicationBase::isStandaloneApp();
     saveRequest = false;
     map = defaultWusbMap();
     loadSettings();
@@ -253,7 +284,7 @@ static void varToMap(const juce::var& v, GuitarService::ControllerMap& m)
     btn("fretG", m.frets[0]); btn("fretR", m.frets[1]); btn("fretY", m.frets[2]);
     btn("fretB", m.frets[3]); btn("fretO", m.frets[4]);
     btn("strumDown", m.strumDown); btn("strumUp", m.strumUp);
-    btn("plus", m.plusBtn); btn("minus", m.minusBtn); btn("palm", m.palmBtn);
+    btn("plus", m.plusBtn); btn("minus", m.minusBtn);
     if (auto* a = v["whammy"].getArray(); a != nullptr && a->size() >= 3)
         m.whammy = { (int) (*a)[0], (int) (*a)[1], (int) (*a)[2] };
     auto stick = [&](const char* k, GuitarService::StickMap& sm)
@@ -275,7 +306,7 @@ static juce::var mapToVar(const GuitarService::ControllerMap& m)
     btn("fretG", m.frets[0]); btn("fretR", m.frets[1]); btn("fretY", m.frets[2]);
     btn("fretB", m.frets[3]); btn("fretO", m.frets[4]);
     btn("strumDown", m.strumDown); btn("strumUp", m.strumUp);
-    btn("plus", m.plusBtn); btn("minus", m.minusBtn); btn("palm", m.palmBtn);
+    btn("plus", m.plusBtn); btn("minus", m.minusBtn);
     o->setProperty("whammy", juce::Array<juce::var> { m.whammy.byteIdx, m.whammy.rest, m.whammy.extreme });
     o->setProperty("stickX", juce::Array<juce::var> { m.stickX.byteIdx, m.stickX.center, m.stickX.lo, m.stickX.hi });
     o->setProperty("stickY", juce::Array<juce::var> { m.stickY.byteIdx, m.stickY.center, m.stickY.lo, m.stickY.hi });
@@ -323,16 +354,29 @@ void GuitarService::loadSettings()
         strumRollMs = juce::jlimit(0, 50, get("strumRoll", 10));
         lefty = get("lefty", 0) != 0;
         palmWhammy = get("palmWhammy", 0) != 0;
-        if (auto* a = v["chords"].getArray(); a != nullptr && a->size() == kChordSlots)
-            for (int i = 0; i < kChordSlots; ++i)
-                if (auto* e = (*a)[i].getArray(); e != nullptr && e->size() >= 2)
+        // binds: "chords"/"solo" = the shared set; "keyBinds" = keys with their own
+        auto readSet = [&](const juce::var& ch, const juce::var& so, int set)
+        {
+            if (auto* a = ch.getArray(); a != nullptr && a->size() == kChordSlots)
+                for (int i = 0; i < kChordSlots; ++i)
+                    if (auto* e = (*a)[i].getArray(); e != nullptr && e->size() >= 2)
+                    {
+                        chordRootA[set][i] = (((int) (*e)[0]) % 12 + 12) % 12;
+                        chordQualA[set][i] = juce::jlimit(0, kNumQualities - 1, (int) (*e)[1]);
+                    }
+            if (auto* a = so.getArray(); a != nullptr && a->size() == kSoloSlots)
+                for (int i = 0; i < kSoloSlots; ++i)
+                    soloOffA[set][i] = juce::jlimit(-24, 36, (int) (*a)[i]);
+        };
+        readSet(v["chords"], v["solo"], kSharedSet);
+        if (auto* kb = v["keyBinds"].getDynamicObject())
+            for (int k = 0; k < 12; ++k)
+                if (kb->hasProperty(juce::String(k)))
                 {
-                    chordRootA[i] = (((int) (*e)[0]) % 12 + 12) % 12;
-                    chordQualA[i] = juce::jlimit(0, kNumQualities - 1, (int) (*e)[1]);
+                    const auto e = kb->getProperty(juce::String(k));
+                    keyOwn[k] = true;
+                    readSet(e["chords"], e["solo"], k);
                 }
-        if (auto* a = v["solo"].getArray(); a != nullptr && a->size() == kSoloSlots)
-            for (int i = 0; i < kSoloSlots; ++i)
-                soloOffA[i] = juce::jlimit(-24, 36, (int) (*a)[i]);
         {
             const juce::ScopedLock sl(midiOutLock);
             midiOutId = v["midiOut"].toString();
@@ -374,13 +418,26 @@ void GuitarService::saveSettings()
     o->setProperty("lefty", lefty.load() ? 1 : 0);
     o->setProperty("palmWhammy", palmWhammy.load() ? 1 : 0);
     {
-        juce::Array<juce::var> ch, so;
-        for (int i = 0; i < kChordSlots; ++i)
-            ch.add(juce::Array<juce::var> { chordRootA[i].load(), chordQualA[i].load() });
-        for (int i = 0; i < kSoloSlots; ++i)
-            so.add(soloOffA[i].load());
-        o->setProperty("chords", ch);
-        o->setProperty("solo", so);
+        auto writeSet = [&](juce::DynamicObject* dst, int set)
+        {
+            juce::Array<juce::var> ch, so;
+            for (int i = 0; i < kChordSlots; ++i)
+                ch.add(juce::Array<juce::var> { chordRootA[set][i].load(), chordQualA[set][i].load() });
+            for (int i = 0; i < kSoloSlots; ++i)
+                so.add(soloOffA[set][i].load());
+            dst->setProperty("chords", ch);
+            dst->setProperty("solo", so);
+        };
+        writeSet(o, kSharedSet);
+        auto* kb = new juce::DynamicObject();
+        for (int k = 0; k < 12; ++k)
+            if (keyOwn[k].load())
+            {
+                auto* e = new juce::DynamicObject();
+                writeSet(e, k);
+                kb->setProperty(juce::String(k), juce::var(e));
+            }
+        o->setProperty("keyBinds", juce::var(kb));
     }
     {
         const juce::ScopedLock sl(midiOutLock);
@@ -471,8 +528,8 @@ void GuitarService::selfTestRun()
     lefty = false;
     palmWhammy = false;
     virtualMidiOn = false;
-    for (int i = 0; i < kChordSlots; ++i) { chordRootA[i] = kChordDefaults[i].root; chordQualA[i] = kChordDefaults[i].quality; }
-    for (int i = 0; i < kSoloSlots; ++i) soloOffA[i] = kSoloDefaults[i];
+    for (int s = 0; s < 13; ++s) fillDefaults(s);
+    for (auto& o : keyOwn) o = false;
     uint8_t r[16] {};
     auto setIdle = [&] { std::memset(r, 0, sizeof(r)); r[12] = 220; r[2] = 62; r[4] = 62; };
     auto run = [&](double secs)
@@ -574,7 +631,7 @@ void GuitarService::sendMsg(const juce::MidiMessage& m)
             c->push(msg);
     }
     // "GH MIDI" virtual source: lets the DAW record the performance as notes
-    if (virtualMidiOn.load() && virtualOut != nullptr)
+    if ((standalone || virtualMidiOn.load()) && virtualOut != nullptr)
         virtualOut->sendMessageNow(msg);
     // user-picked port (Windows: loopMIDI or a real synth)
     if (portOut != nullptr)
@@ -772,6 +829,17 @@ void GuitarService::run()
 
         if (midiOutRequest.exchange(false))
             openMidiOutput();
+        if (settingsResetRequest.exchange(false))
+        {
+            if (auto* o = controllersVar.getDynamicObject())
+                o->removeProperty(juce::Identifier(deviceKey()));
+            applyMapForDevice();   // known guitar: factory map; others: blank
+            lefty = false;
+            palmWhammy = false;
+            virtualMidiOn = true;
+            allOff();
+            saveRequest = true;
+        }
         if (saveRequest.exchange(false))
             saveSettings();
         if (scanRequest.exchange(false))
@@ -898,8 +966,7 @@ juce::String GuitarService::targetName(int t)
 {
     static const char* names[] = { "GREEN FRET", "RED FRET", "YELLOW FRET", "BLUE FRET",
                                    "ORANGE FRET", "STRUM DOWN", "STRUM UP", "PLUS BUTTON",
-                                   "MINUS BUTTON", "WHAMMY", "JOYSTICK LEFT/RIGHT", "JOYSTICK UP/DOWN",
-                                   "PALM MUTE (HOLD)" };
+                                   "MINUS BUTTON", "WHAMMY", "JOYSTICK LEFT/RIGHT", "JOYSTICK UP/DOWN" };
     return t >= 0 && t < LTargetCount ? names[t] : juce::String();
 }
 
@@ -912,7 +979,6 @@ static GuitarService::ButtonMap* buttonSlot(GuitarService::ControllerMap& m, int
         case 6: return &m.strumUp;
         case 7: return &m.plusBtn;
         case 8: return &m.minusBtn;
-        case GuitarService::LPalm: return &m.palmBtn;
         default: return nullptr;
     }
 }
@@ -986,11 +1052,10 @@ void GuitarService::learnTick(const uint8_t* d, int len, double now)
         for (auto& b : map.frets)
             if (b.byteIdx == i) return true;
         return map.strumDown.byteIdx == i || map.strumUp.byteIdx == i
-            || map.plusBtn.byteIdx == i || map.minusBtn.byteIdx == i
-            || map.palmBtn.byteIdx == i;
+            || map.plusBtn.byteIdx == i || map.minusBtn.byteIdx == i;
     };
 
-    if (t <= LMinus || t == LPalm)  // buttons: first stable change binds
+    if (t <= LMinus)  // buttons: first stable change binds
     {
         if (learnPhase == 1)
         {
@@ -1164,7 +1229,6 @@ void GuitarService::step(const uint8_t* d, int len)
     const bool strum = down || up;
     const bool plusB = pressed(m.plusBtn);
     const bool minusB = pressed(m.minusBtn);
-    const bool palmB = pressed(m.palmBtn);
     const bool flip = lefty.load();
 
     uiFretBits = combo;
@@ -1192,7 +1256,6 @@ void GuitarService::step(const uint8_t* d, int len)
         if (up) bits |= 1 << LStrumUp;
         if (plusB) bits |= 1 << LPlus;
         if (minusB) bits |= 1 << LMinus;
-        if (palmB) bits |= 1 << LPalm;
         if (m.stickX.valid() && m.stickX.byteIdx < len
             && std::abs((int) d[m.stickX.byteIdx] - m.stickX.center) > (m.stickX.hi - m.stickX.lo) / 5)
             bits |= 1 << LStickX;
@@ -1244,7 +1307,7 @@ void GuitarService::step(const uint8_t* d, int len)
             bend = pb;
         }
     }
-    const bool palm = palmB || (palmMode && wamt > kPalmWhammy);
+    const bool palm = palmMode && wamt > kPalmWhammy;
 
     // joystick flicks: left/right = key, up/down = octave (SOLO: range).
     // Ignored while the whammy is in use -- on some guitars the whammy bleeds
@@ -1317,8 +1380,8 @@ void GuitarService::step(const uint8_t* d, int len)
                     if (slot < 0)
                         slot = juce::jmax(0, topFretNow);   // single-fret slots are 0..4
                     const int mask = kChordDefaults[slot].mask;
-                    const auto& q = kQualities[chordQualA[slot].load()];
-                    const int root = kChordRootBase + key + easyOct + chordRootA[slot].load();
+                    const auto& q = kQualities[chordQuality(slot)];
+                    const int root = kChordRootBase + key + easyOct + chordRoot(slot);
                     // chord tones low -> high, then the strum order
                     juce::Array<int> seq;
                     if (muted)
@@ -1349,7 +1412,7 @@ void GuitarService::step(const uint8_t* d, int len)
                     voices = seq.size();
                     ringFret = mask;   // in CHORDS this holds the fret MASK
                     beginGem(mask, false);
-                    announce(chordName(key, chordRootA[slot].load(), chordQualA[slot].load()));
+                    announce(chordName(key, chordRoot(slot), chordQuality(slot)));
                 }
                 else
                 {
